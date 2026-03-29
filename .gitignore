@@ -5,3 +5,4 @@ proptest-regressions
 artifacts/
 *.bin
 *pocket-ic
+msg.json
