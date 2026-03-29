@@ -1,13 +1,38 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+usage() {
+    echo "Usage: $0 [OPTIONS]"
+    echo ""
+    echo "Prepare an SNS upgrade proposal for the WaterNeuron canister."
+    echo ""
+    echo "Options:"
+    echo "  --neuron-id <id>     Proposer neuron id (hex)"
+    echo "  --pem-file <path>    Path to PEM file for quill"
+    echo "  --title <title>      Proposal title (default: 'Upgrade WaterNeuron Protocol')"
+    echo "  --description <desc> Optional description body"
+    exit 1
+}
+
 TARGET_CANISTER="tsbvt-pyaaa-aaaar-qafva-cai"
 NEURON_ID="85ff8b442cca2eb2943fe74127085745f16d95b0d539993cd093f682f774dca8"
-SNS_CANISTER_IDS="./sns_canister_ids.json"
+PEM_FILE=""
+GOVERNANCE_CANISTER="jfnic-kaaaa-aaaaq-aadla-cai"
 WASM_PATH="./artifacts/water_neuron.wasm.gz"
 DID_PATH="./water_neuron/water_neuron.did"
-TITLE="${1:-Upgrade WaterNeuron Protocol}"
-DESCRIPTION="${2:-}"
+TITLE="Upgrade WaterNeuron Protocol"
+DESCRIPTION=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --neuron-id) NEURON_ID="$2"; shift 2 ;;
+        --pem-file) PEM_FILE="$2"; shift 2 ;;
+        --title) TITLE="$2"; shift 2 ;;
+        --description) DESCRIPTION="$2"; shift 2 ;;
+        --help|-h) usage ;;
+        *) echo "Unknown option: $1"; usage ;;
+    esac
+done
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
@@ -88,19 +113,8 @@ cat > "$PROPOSAL_DIR/submit.sh" << 'SCRIPT_HEADER'
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [ -z "${PEM_FILE:-}" ]; then
-    echo "Error: PEM_FILE not set."
-    echo "  export PEM_FILE=~/.config/dfx/identity/default/identity.pem"
-    exit 1
-fi
-
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
-
-if [ ! -f sns_canister_ids.json ]; then
-    echo "Error: sns_canister_ids.json not found in repo root."
-    exit 1
-fi
 
 if [ ! -f water_neuron_arg.bin ]; then
     echo "Error: water_neuron_arg.bin not found. Run scripts/prepare-proposal.sh first."
@@ -109,7 +123,31 @@ fi
 
 SCRIPT_HEADER
 
+# Determine PEM flag for the generated submit script.
+if [ -n "$PEM_FILE" ]; then
+    PEM_FLAG="--pem-file \"${PEM_FILE}\""
+else
+    PEM_FLAG='--pem-file "$PEM_FILE"'
+    # Add PEM_FILE check to submit.sh when not baked in.
+    cat >> "$PROPOSAL_DIR/submit.sh" << 'PEM_CHECK'
+if [ -z "${PEM_FILE:-}" ]; then
+    echo "Error: PEM_FILE not set."
+    echo "  export PEM_FILE=~/.config/dfx/identity/default/identity.pem"
+    exit 1
+fi
+
+PEM_CHECK
+fi
+
 cat >> "$PROPOSAL_DIR/submit.sh" << EOF
+SNS_CANISTER_IDS="\$(mktemp)"
+cat > "\$SNS_CANISTER_IDS" << 'IDS'
+{
+    "governance_canister_id": "${GOVERNANCE_CANISTER}",
+    "root_canister_id": ""
+}
+IDS
+
 PROPOSAL_DIR="${PROPOSAL_DIR}"
 
 quill sns make-upgrade-canister-proposal ${NEURON_ID} \\
@@ -120,8 +158,10 @@ quill sns make-upgrade-canister-proposal ${NEURON_ID} \\
     --summary-path "\${REPO_ROOT}/\${PROPOSAL_DIR}/summary.md" \\
     --title "${TITLE}" \\
     --url "https://github.com/internet-computer/wtn" \\
-    --pem-file "\$PEM_FILE" \\
-    --canister-ids-file ./sns_canister_ids.json > msg.json
+    ${PEM_FLAG} \\
+    --canister-ids-file "\$SNS_CANISTER_IDS" > msg.json
+
+rm -f "\$SNS_CANISTER_IDS"
 
 echo ""
 echo "Proposal message written to msg.json"
@@ -136,6 +176,8 @@ echo "  submit.sh   -- run to generate msg.json"
 echo ""
 echo "Next steps:"
 echo "  1. Review ${PROPOSAL_DIR}/summary.md"
-echo "  2. export PEM_FILE=~/.config/dfx/identity/default/identity.pem"
+if [ -z "$PEM_FILE" ]; then
+    echo "  2. export PEM_FILE=~/.config/dfx/identity/default/identity.pem"
+fi
 echo "  3. nix develop --command bash ${PROPOSAL_DIR}/submit.sh"
 echo "  4. quill send msg.json"
