@@ -1,6 +1,6 @@
 use crate::guards::GuardPrincipal;
 use crate::logs::{DEBUG, INFO};
-use crate::management::{merge_neuron_into_six_months, stop_dissolvement};
+use crate::management::{merge_neuron_into_six_months, start_dissolving, stop_dissolvement};
 use crate::nns_types::{NeuronId, time_left_seconds};
 use crate::numeric::{ICP, nICP};
 use crate::state::audit::process_event;
@@ -14,7 +14,8 @@ use crate::{
 use candid::Nat;
 use ic_canister_log::log;
 use ic_nns_governance_api::{
-    manage_neuron_response::Command as CommandResponse, manage_neuron_response::MergeResponse,
+    manage_neuron_response::Command as CommandResponse,
+    manage_neuron_response::ConfigureResponse, manage_neuron_response::MergeResponse,
 };
 use icrc_ledger_client_cdk::{CdkRuntime, ICRC1Client};
 use icrc_ledger_types::icrc1::account::Account;
@@ -67,9 +68,20 @@ pub async fn cancel_withdrawal(
         neuron_id.id
     );
 
-    let stop_dissolvement_result = stop_dissolvement(neuron_id)
-        .await
-        .map_err(|error_msg| CancelWithdrawalError::StopDissolvementError { message: error_msg });
+    // `manage_neuron` reports governance-level failures inside the response rather than as a call
+    // error, so the command has to be checked: a `StopDissolving` that governance refused must abort
+    // the cancel instead of falling through to a merge the caller never earned.
+    let stop_dissolvement_result = match stop_dissolvement(neuron_id).await {
+        Ok(response)
+            if response.command == Some(CommandResponse::Configure(ConfigureResponse {})) =>
+        {
+            Ok(())
+        }
+        Ok(response) => Err(CancelWithdrawalError::StopDissolvementError {
+            message: format!("{response:?}"),
+        }),
+        Err(error_msg) => Err(CancelWithdrawalError::StopDissolvementError { message: error_msg }),
+    };
 
     if stop_dissolvement_result.is_err() {
         log!(
@@ -80,6 +92,31 @@ pub async fn cancel_withdrawal(
 
     stop_dissolvement_result?;
 
+    let merge_result = merge_withdrawal_neuron(neuron_id).await;
+
+    if merge_result.is_err() {
+        // The `StopDissolving` above has already landed. Leaving it in place parks the neuron at a
+        // dissolve delay that never counts down, so the withdrawal could never disburse and a later
+        // retry would merge a neuron frozen high, dragging the main neuron's own delay up with it
+        // (an NNS merge takes `max(source, target)`). Restarting the dissolve restores the absolute
+        // timestamp the neuron had, give or take the latency of these two calls.
+        if let Err(error) = start_dissolving(neuron_id).await {
+            log!(
+                INFO,
+                "[cancel_withdrawal] Failed to restart the dissolvement of neuron {} after a failed \
+                 merge, it is parked and cannot disburse: {error:?}",
+                neuron_id.id
+            );
+        }
+    }
+
+    merge_result
+}
+
+/// Merges a stopped withdrawal neuron back into the main neuron and credits the caller.
+async fn merge_withdrawal_neuron(
+    neuron_id: NeuronId,
+) -> Result<MergeResponse, CancelWithdrawalError> {
     match merge_neuron_into_six_months(neuron_id)
         .await
         .map_err(|error_msg| CancelWithdrawalError::MergeNeuronError { message: error_msg })?

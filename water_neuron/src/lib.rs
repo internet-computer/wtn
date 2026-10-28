@@ -25,7 +25,7 @@ use crate::tasks::{TaskType, schedule_after, schedule_now};
 use candid::{CandidType, Deserialize, Nat, Principal};
 use ic_canister_log::log;
 use ic_nns_governance_api::{
-    GovernanceError, ListNeurons, Topic, governance_error::ErrorType,
+    GovernanceError, ListNeurons, Neuron, Topic, governance_error::ErrorType,
     manage_neuron_response::Command as CommandResponse, neuron::DissolveState,
 };
 use icrc_ledger_client_cdk::{CdkRuntime, ICRC1Client};
@@ -832,6 +832,43 @@ pub async fn process_start_dissolving() {
     }
 }
 
+/// A withdrawal neuron waiting to disburse must be counting down towards its dissolve timestamp.
+/// One that the NNS reports as NotDissolving was stopped by a `cancel_withdrawal` whose merge then
+/// failed, and is parked at a dissolve delay that never reaches zero: unless the dissolve is
+/// restarted the request can never disburse, and a later cancel would merge the neuron at that
+/// frozen delay and raise the main neuron's own delay to match.
+async fn restart_parked_dissolvement(neuron: &Neuron) {
+    let Some(DissolveState::DissolveDelaySeconds(delay)) = neuron.dissolve_state else {
+        return;
+    };
+    let Some(neuron_id) = neuron.id.as_ref().map(|id| NeuronId { id: id.id }) else {
+        return;
+    };
+    // Maturity neurons share `to_disburse` and are spawning rather than dissolving.
+    if delay == 0 || read_state(|s| s.neuron_id_to_withdrawal_id(neuron_id).is_none()) {
+        return;
+    }
+
+    log!(
+        INFO,
+        "[process_disburse] Neuron {} is parked at a dissolve delay of {delay}s, restarting its dissolvement",
+        neuron_id.id
+    );
+
+    match start_dissolving(neuron_id).await {
+        Ok(()) => log!(
+            INFO,
+            "[process_disburse] Restarted the dissolvement of neuron {}",
+            neuron_id.id
+        ),
+        Err(error) => log!(
+            INFO,
+            "[process_disburse] Failed to restart the dissolvement of neuron {}: {error:?}",
+            neuron_id.id
+        ),
+    }
+}
+
 pub async fn process_disburse() {
     if read_state(|s| s.to_disburse.is_empty()) {
         return;
@@ -901,6 +938,7 @@ pub async fn process_disburse() {
                         dissolved
                     );
                     if !dissolved {
+                        restart_parked_dissolvement(&neuron).await;
                         continue;
                     }
                     if let Some(neuron_id) = neuron.id {

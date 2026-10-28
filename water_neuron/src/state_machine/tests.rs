@@ -8,8 +8,9 @@ use crate::state_machine::{
 };
 use crate::{
     CancelWithdrawalError, ConversionError, DEFAULT_LEDGER_FEE, DepositSuccess, E8S, ICP,
-    LiquidArg, MIN_DISSOLVE_DELAY_FOR_REWARDS, ONE_DAY_SECONDS, ONE_MONTH_SECONDS, PendingTransfer,
-    Unit, UpgradeArg, WithdrawalSuccess, compute_neuron_staking_subaccount_bytes, nICP,
+    LiquidArg, MIN_DISSOLVE_DELAY_FOR_REWARDS, NeuronId, ONE_DAY_SECONDS, ONE_MONTH_SECONDS,
+    PendingTransfer, Unit, UpgradeArg, WithdrawalSuccess, compute_neuron_staking_subaccount_bytes,
+    nICP,
 };
 use assert_matches::assert_matches;
 use candid::{Encode, Nat, Principal};
@@ -17,7 +18,7 @@ use ic_base_types::PrincipalId;
 use ic_nns_constants::GOVERNANCE_CANISTER_ID;
 use ic_nns_governance_api::{
     MakeProposalRequest, ManageNeuronResponse, Motion, ProposalActionRequest,
-    manage_neuron_response::Command as CommandResponse, neuron,
+    governance_error::ErrorType, manage_neuron_response::Command as CommandResponse, neuron,
 };
 use ic_sns_governance_api::pb::v1::ListProposals;
 use ic_wasm_utils::water_neuron_wasm;
@@ -1319,5 +1320,169 @@ async fn should_restore_min_dissolve_delay_after_stop_dissolving() {
             )
             .await,
         Err(e) if e.contains("already >= target")
+    );
+}
+
+/// The dissolve delay the main neuron carried before #110 lowered it to two weeks.
+const PRE_110_MIN_DISSOLVE_DELAY: u64 = 6 * ONE_MONTH_SECONDS + ONE_DAY_SECONDS;
+
+/// Rebuilds the mainnet state that produced the 151-day jump on the main neuron on 2026-10-20.
+///
+/// Every withdrawal neuron still outstanding was split off a main neuron sitting at
+/// `PRE_110_MIN_DISSOLVE_DELAY`, so it inherited roughly six months. SNS proposal 7720 then started
+/// the main neuron dissolving, and the NNS refuses `Merge` when either neuron is dissolving
+/// (`MergeNeuronsError::TargetNeuronDissolving`). Every `cancel_withdrawal` issued during that
+/// window is therefore applied by halves: `StopDissolving` lands on the withdrawal neuron, the
+/// merge that was supposed to follow does not.
+///
+/// Returns the id of the withdrawal neuron left behind in that half-cancelled state.
+async fn stall_cancel_withdrawal_on_a_dissolving_main_neuron(
+    water_neuron: &mut WaterNeuron,
+    caller: PrincipalId,
+) -> NeuronId {
+    init_wtn_withdrawal_setup(water_neuron).await;
+
+    let water_neuron_principal = PrincipalId::from(water_neuron.water_neuron_id);
+    let neuron_id_6m = water_neuron
+        .get_info()
+        .await
+        .neuron_id_6m
+        .expect("6m neuron should exist");
+    nns_increase_dissolve_delay(
+        water_neuron,
+        water_neuron_principal,
+        neuron_id_6m,
+        PRE_110_MIN_DISSOLVE_DELAY - MIN_DISSOLVE_DELAY_FOR_REWARDS,
+    )
+    .await;
+
+    match water_neuron.nicp_to_icp(caller.0.into(), 10 * E8S).await {
+        Ok(WithdrawalSuccess { withdrawal_id, .. }) => assert_eq!(withdrawal_id, 0),
+        Err(e) => panic!("Expected WithdrawalSuccess, got {e:?}"),
+    }
+    water_neuron.advance_time_and_tick(ONE_DAY_SECONDS).await;
+
+    let requests = water_neuron.get_withdrawal_requests(caller.0).await;
+    assert_matches!(
+        requests[0].status,
+        WithdrawalStatus::WaitingDissolvement { .. }
+    );
+    let withdrawal_neuron_id = requests[0]
+        .request
+        .neuron_id
+        .expect("the withdrawal neuron should have been split");
+
+    // Both neurons carry the same dissolve delay, so without a gap here they would reach zero at
+    // the same second and a merge taking `max(source, target)` would be a coin flip. Starting the
+    // main neuron three days late keeps it the later of the two throughout.
+    water_neuron
+        .advance_time_and_tick(3 * ONE_DAY_SECONDS)
+        .await;
+
+    // SNS proposal 7720.
+    water_neuron
+        .main_neuron_call("start_dissolving_main_neuron", SIX_MONTHS_NEURON_NONCE)
+        .await
+        .expect("failed to start dissolving the main neuron");
+    water_neuron.advance_time_and_tick(ONE_DAY_SECONDS).await;
+
+    // `cancel_withdrawal` stops the withdrawal neuron first and only then merges, so this failure
+    // arrives after the neuron has already been taken out of Dissolving.
+    assert_matches!(
+        water_neuron
+            .cancel_withdrawal(caller.0.into(), withdrawal_neuron_id)
+            .await,
+        Err(CancelWithdrawalError::GovernanceError(error))
+            if error.error_type == ErrorType::RequiresNotDissolving as i32
+    );
+
+    withdrawal_neuron_id
+}
+
+/// Cancelling a withdrawal must never raise the main neuron's dissolve delay.
+///
+/// An NNS merge gives the target `max(source.dissolve_delay, target.dissolve_delay)`
+/// (`rs/nns/governance/src/governance/merge_neurons.rs`), so a withdrawal neuron frozen high by a
+/// half-applied cancel drags the main neuron up with it when the cancel is retried. That is what
+/// moved the main neuron from ~10 days to 151 days on 2026-10-20, which in turn makes
+/// `set_main_neuron_to_min_dissolve_delay` (NSF 1006) unable to bring it back down.
+#[tokio::test]
+async fn should_not_raise_main_neuron_dissolve_delay_on_cancel_withdrawal() {
+    let mut water_neuron = WaterNeuron::new().await;
+    let caller = PrincipalId::new_user_test_id(212);
+    let withdrawal_neuron_id =
+        stall_cancel_withdrawal_on_a_dissolving_main_neuron(&mut water_neuron, caller).await;
+    let neuron_id_6m = water_neuron
+        .get_info()
+        .await
+        .neuron_id_6m
+        .expect("6m neuron should exist")
+        .id;
+
+    // SNS proposal 10324: the main neuron is stopped once it is deep into its dissolve. The
+    // withdrawal neuron has been counting down alongside it, so neither sits far above the other.
+    water_neuron.advance_time_and_tick(5 * ONE_MONTH_SECONDS).await;
+    water_neuron
+        .main_neuron_call("stop_dissolving_main_neuron", SIX_MONTHS_NEURON_NONCE)
+        .await
+        .expect("failed to stop dissolving the main neuron");
+
+    let before = match dissolve_state(&water_neuron, neuron_id_6m).await {
+        neuron::DissolveState::DissolveDelaySeconds(delay) => delay,
+        other => panic!("expected a stopped main neuron, got {other:?}"),
+    };
+
+    // The main neuron is no longer dissolving, so the cancel the earlier window refused goes
+    // through, and the merge takes the larger of the two delays.
+    water_neuron
+        .cancel_withdrawal(caller.0.into(), withdrawal_neuron_id)
+        .await
+        .expect("failed to cancel the withdrawal");
+
+    let after = match dissolve_state(&water_neuron, neuron_id_6m).await {
+        neuron::DissolveState::DissolveDelaySeconds(delay) => delay,
+        other => panic!("expected a stopped main neuron, got {other:?}"),
+    };
+    assert!(
+        after <= before,
+        "cancelling a withdrawal raised the main neuron dissolve delay from {before}s to {after}s"
+    );
+}
+
+/// A cancel that cannot complete must leave the withdrawal exactly as it found it.
+///
+/// Without the rollback the `StopDissolving` half survives the failure and the withdrawal neuron is
+/// parked at a frozen dissolve delay that never counts down: the request sits in
+/// `WaitingDissolvement` forever and the ICP is unreachable. Seven mainnet withdrawals are in that
+/// state as of 2026-10-20, holding 3357.08945204 ICP: 1528, 1608, 1614, 1615, 1645, 1648 and 1664.
+/// Reproduce the list with
+/// `cargo run --manifest-path scripts/neuron_info/Cargo.toml --bin withdrawals_audit`.
+#[tokio::test]
+async fn should_disburse_withdrawal_after_a_failed_cancel() {
+    let mut water_neuron = WaterNeuron::new().await;
+    let caller = PrincipalId::new_user_test_id(212);
+    let withdrawal_neuron_id =
+        stall_cancel_withdrawal_on_a_dissolving_main_neuron(&mut water_neuron, caller).await;
+
+    assert_matches!(
+        dissolve_state(&water_neuron, withdrawal_neuron_id.id).await,
+        neuron::DissolveState::WhenDissolvedTimestampSeconds(_),
+        "a failed cancel should leave the withdrawal neuron dissolving"
+    );
+
+    // SNS proposal 10324, so that nothing but the withdrawal neuron's own schedule is in play.
+    water_neuron
+        .main_neuron_call("stop_dissolving_main_neuron", SIX_MONTHS_NEURON_NONCE)
+        .await
+        .expect("failed to stop dissolving the main neuron");
+
+    // Comfortably past the withdrawal neuron's six-month horizon.
+    for _ in 0..8 {
+        water_neuron.advance_time_and_tick(ONE_MONTH_SECONDS).await;
+    }
+
+    assert_matches!(
+        water_neuron.get_withdrawal_requests(caller.0).await[0].status,
+        WithdrawalStatus::ConversionDone { .. }
     );
 }
