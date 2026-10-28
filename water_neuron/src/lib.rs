@@ -80,7 +80,10 @@ pub const ONE_DAY_SECONDS: u64 = 24 * 60 * 60;
 pub const ONE_WEEK_SECONDS: u64 = 7 * ONE_DAY_SECONDS;
 pub const ONE_YEAR_SECONDS: u64 = (4 * 365 + 1) * ONE_DAY_SECONDS / 4;
 pub const ONE_MONTH_SECONDS: u64 = ONE_YEAR_SECONDS / 12;
-pub const MAX_DISSOLVE_DELAY_SECONDS: u64 = 8 * ONE_YEAR_SECONDS;
+/// The NNS cut the maximum dissolve delay from eight years to two in Mission 70; an increase past
+/// this is rejected. Neurons that sat at the old maximum keep their bonus through
+/// `eight_year_gang_bonus_base_e8s` instead.
+pub const MAX_DISSOLVE_DELAY_SECONDS: u64 = 2 * ONE_YEAR_SECONDS;
 pub const MIN_DISSOLVE_DELAY_FOR_REWARDS: u64 = 2 * ONE_WEEK_SECONDS;
 
 pub const DEFAULT_LEDGER_FEE: u64 = 10_000;

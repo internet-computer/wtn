@@ -16,9 +16,9 @@ const NNS_GOVERNANCE: &str = "rrkah-fqaaa-aaaaa-aaaaq-cai";
 const DEFAULT_CONTROLLER: &str = "tsbvt-pyaaa-aaaar-qafva-cai";
 const DAY: u64 = 86_400;
 const E8S: u64 = 100_000_000;
-/// MAX_DISSOLVE_DELAY_SECONDS, rs/nns/governance/src/governance.rs — 8 * ONE_YEAR_SECONDS.
-/// Not exposed by any governance endpoint, unlike the minimum.
-const MAX_DISSOLVE_DELAY_SECONDS: u64 = 252_460_800;
+/// MAX_DISSOLVE_DELAY_SECONDS, rs/nns/governance — 2 * ONE_YEAR_SECONDS since Mission 70 cut it
+/// from eight years. Not exposed by any governance endpoint, unlike the minimum.
+const MAX_DISSOLVE_DELAY_SECONDS: u64 = 63_115_200;
 
 #[derive(CandidType, Deserialize, Debug)]
 struct NeuronInfo {
