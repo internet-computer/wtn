@@ -1005,6 +1005,22 @@ impl WaterNeuron {
         .expect("failed to get approve_proposal")
     }
 
+    /// Calls one of the main-neuron endpoints gated to the SNS governance canister.
+    async fn main_neuron_call(
+        &self,
+        method: &str,
+        neuron_nonce: u64,
+    ) -> Result<ManageNeuronResponse, String> {
+        self.update::<Result<ManageNeuronResponse, String>>(
+            PrincipalId::from(self.wtn_governance_id),
+            self.water_neuron_id,
+            method,
+            neuron_nonce,
+        )
+        .await
+        .unwrap_or_else(|e| panic!("failed to call {method}: {e:?}"))
+    }
+
     async fn get_info(&self) -> CanisterInfo {
         self.query::<CanisterInfo>(self.water_neuron_id, "get_info", Encode!().unwrap())
             .await

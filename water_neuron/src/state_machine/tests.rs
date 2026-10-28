@@ -1,5 +1,7 @@
 use crate::sns_distribution::EXPECTED_INITIAL_BALANCE;
-use crate::state::{SNS_GOVERNANCE_SUBACCOUNT, TransferStatus, WithdrawalStatus};
+use crate::state::{
+    SIX_MONTHS_NEURON_NONCE, SNS_GOVERNANCE_SUBACCOUNT, TransferStatus, WithdrawalStatus,
+};
 use crate::state_machine::{
     WaterNeuron, init_wtn_withdrawal_setup, nns_claim_or_refresh_neuron,
     nns_governance_make_proposal, nns_increase_dissolve_delay, update,
@@ -1195,4 +1197,127 @@ async fn should_mirror_all_proposals() {
         )
         .await;
     assert_eq!(proposals.proposals.len(), 4);
+}
+
+/// Reproduces the mainnet wedge created by proposal 7720: while the main neuron is dissolving, every
+/// withdrawal neuron split off it is born Dissolving, StartDissolving on it is rejected with
+/// RequiresNotDissolving, and the request never reaches to_disburse. 52 requests holding 41,532 ICP
+/// are stuck this way as of 2026-10-15. Fails until process_start_dissolving treats that error as
+/// success.
+#[tokio::test]
+async fn should_disburse_withdrawal_split_from_a_dissolving_main_neuron() {
+    let mut water_neuron = WaterNeuron::new().await;
+    let caller = PrincipalId::new_user_test_id(212);
+    init_wtn_withdrawal_setup(&mut water_neuron).await;
+
+    water_neuron
+        .main_neuron_call("start_dissolving_main_neuron", SIX_MONTHS_NEURON_NONCE)
+        .await
+        .expect("failed to start dissolving the main neuron");
+
+    match water_neuron.nicp_to_icp(caller.0.into(), 10 * E8S).await {
+        Ok(WithdrawalSuccess { withdrawal_id, .. }) => assert_eq!(withdrawal_id, 0),
+        Err(e) => panic!("Expected WithdrawalSuccess, got {e:?}"),
+    }
+
+    water_neuron.advance_time_and_tick(ONE_DAY_SECONDS).await;
+
+    // The split child is dissolving already, so the request has to move on without a successful
+    // StartDissolving call.
+    assert_matches!(
+        water_neuron.get_withdrawal_requests(caller.0).await[0].status,
+        WithdrawalStatus::WaitingDissolvement { .. }
+    );
+
+    // The child inherited the parent's absolute dissolve timestamp, so it matures with the parent.
+    for _ in 0..15 {
+        water_neuron.advance_time_and_tick(ONE_DAY_SECONDS).await;
+    }
+
+    assert_matches!(
+        water_neuron.get_withdrawal_requests(caller.0).await[0].status,
+        WithdrawalStatus::ConversionDone { .. }
+    );
+}
+
+async fn dissolve_state(wn: &WaterNeuron, neuron_id: u64) -> neuron::DissolveState {
+    wn.get_full_neuron(neuron_id)
+        .await
+        .unwrap()
+        .unwrap()
+        .dissolve_state
+        .unwrap()
+}
+
+#[tokio::test]
+async fn should_restore_min_dissolve_delay_after_stop_dissolving() {
+    let water_neuron = WaterNeuron::new().await;
+    let neuron_id = water_neuron
+        .get_info()
+        .await
+        .neuron_id_6m
+        .expect("6m neuron should exist")
+        .id;
+
+    assert_eq!(
+        dissolve_state(&water_neuron, neuron_id).await,
+        neuron::DissolveState::DissolveDelaySeconds(MIN_DISSOLVE_DELAY_FOR_REWARDS)
+    );
+
+    water_neuron
+        .main_neuron_call("start_dissolving_main_neuron", SIX_MONTHS_NEURON_NONCE)
+        .await
+        .expect("failed to start dissolving");
+    assert_matches!(
+        dissolve_state(&water_neuron, neuron_id).await,
+        neuron::DissolveState::WhenDissolvedTimestampSeconds(_)
+    );
+
+    // Raising the delay is refused while the neuron is dissolving. That ordering is what forces
+    // the transition to be two proposals, 1005 then 1006.
+    assert_eq!(
+        water_neuron
+            .main_neuron_call(
+                "set_main_neuron_to_min_dissolve_delay",
+                SIX_MONTHS_NEURON_NONCE
+            )
+            .await,
+        Err("neuron is still dissolving; stop dissolving first".to_string())
+    );
+
+    // The neuron starts at exactly the target, so any elapsed time drops it below.
+    water_neuron.advance_time_and_tick(60 * 60).await;
+    water_neuron
+        .main_neuron_call("stop_dissolving_main_neuron", SIX_MONTHS_NEURON_NONCE)
+        .await
+        .expect("failed to stop dissolving");
+
+    let frozen = match dissolve_state(&water_neuron, neuron_id).await {
+        neuron::DissolveState::DissolveDelaySeconds(d) => d,
+        other => panic!("expected a stopped neuron, got {other:?}"),
+    };
+    assert!(frozen < MIN_DISSOLVE_DELAY_FOR_REWARDS, "frozen at {frozen}");
+
+    water_neuron
+        .main_neuron_call(
+            "set_main_neuron_to_min_dissolve_delay",
+            SIX_MONTHS_NEURON_NONCE,
+        )
+        .await
+        .expect("failed to set the min dissolve delay");
+    assert_eq!(
+        dissolve_state(&water_neuron, neuron_id).await,
+        neuron::DissolveState::DissolveDelaySeconds(MIN_DISSOLVE_DELAY_FOR_REWARDS)
+    );
+
+    // Already at the target, so a second run is refused rather than stacking more delay.
+    assert_matches!(
+        water_neuron
+            .main_neuron_call(
+                "set_main_neuron_to_min_dissolve_delay",
+                SIX_MONTHS_NEURON_NONCE
+            )
+            .await,
+        Err(e) if e.contains("already >= target")
+    );
 }

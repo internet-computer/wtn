@@ -2,9 +2,9 @@ use crate::dashboard::DisplayAmount;
 use crate::guards::{GuardError, TaskGuard};
 use crate::logs::{DEBUG, INFO};
 use crate::management::{
-    balance_of, disburse, follow_neuron, get_full_neuron, increase_dissolve_delay, list_neurons,
-    manage_neuron_sns, refresh_neuron, register_vote, spawn_all_maturity, split_neuron,
-    start_dissolving, transfer,
+    StartDissolvingError, balance_of, disburse, follow_neuron, get_full_neuron,
+    increase_dissolve_delay, list_neurons, manage_neuron_sns, refresh_neuron, register_vote,
+    spawn_all_maturity, split_neuron, start_dissolving, transfer,
 };
 use crate::nns_types::{NeuronId, ProposalId, is_dissolved};
 use crate::numeric::{ICP, nICP};
@@ -25,8 +25,8 @@ use crate::tasks::{TaskType, schedule_after, schedule_now};
 use candid::{CandidType, Deserialize, Nat, Principal};
 use ic_canister_log::log;
 use ic_nns_governance_api::{
-    GovernanceError, ListNeurons, Topic, manage_neuron_response::Command as CommandResponse,
-    neuron::DissolveState,
+    GovernanceError, ListNeurons, Topic, governance_error::ErrorType,
+    manage_neuron_response::Command as CommandResponse, neuron::DissolveState,
 };
 use icrc_ledger_client_cdk::{CdkRuntime, ICRC1Client};
 use icrc_ledger_types::icrc1::account::Account;
@@ -777,6 +777,21 @@ async fn fetch_neuron_stake(neuron_id: u64) -> Result<ICP, String> {
     }
 }
 
+/// A neuron split off a dissolving parent inherits its dissolve state, and the NNS rejects
+/// StartDissolving on anything that is not NotDissolving. The neuron is then already in the state
+/// the call was meant to reach, so the withdrawal must move on to disbursement rather than retry
+/// forever.
+fn is_already_dissolving(result: &Result<(), StartDissolvingError>) -> bool {
+    let Err(StartDissolvingError::UnexpectedAnswer(response)) = result else {
+        return false;
+    };
+    matches!(
+        &response.command,
+        Some(CommandResponse::Error(error))
+            if error.error_type == ErrorType::RequiresNotDissolving as i32
+    )
+}
+
 pub async fn process_start_dissolving() {
     if read_state(|s| s.withdrawal_to_start_dissolving.is_empty()) {
         return;
@@ -793,7 +808,7 @@ pub async fn process_start_dissolving() {
             return;
         }
         let result = start_dissolving(*neuron_id).await;
-        if result.is_ok() {
+        if result.is_ok() || is_already_dissolving(&result) {
             mutate_state(|s| {
                 if let Some(withdrawal_id) = s.neuron_id_to_withdrawal_id(*neuron_id) {
                     process_event(s, EventType::StartedToDissolve { withdrawal_id });
