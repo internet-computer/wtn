@@ -35,7 +35,9 @@ pub async fn cancel_withdrawal(
         Ok(result) => match result {
             Ok(neuron) => match time_left_seconds(&neuron, timestamp_nanos() / crate::SEC_NANOS) {
                 Some(time) => {
-                    if time < ONE_DAY_SECONDS * 14 {
+                    // Buffer against the disbursement timer, scaled to the two-week delay: the
+                    // old fourteen days covered the whole window.
+                    if time < ONE_DAY_SECONDS {
                         return Err(CancelWithdrawalError::TooLate);
                     }
                 }
