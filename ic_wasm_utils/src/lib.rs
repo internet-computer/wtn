@@ -1,7 +1,11 @@
 use lazy_static::lazy_static;
 use sha2::{Digest, Sha256};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::{collections::BTreeMap, path::PathBuf};
 use thiserror::Error;
+
+/// Paired with the process id, keeps one download's staging file from colliding with another's.
+static STAGING_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -242,7 +246,14 @@ async fn fetch_remote_wasm(canister: CanisterName) -> Result<PathBuf> {
         return Err(Error::HashMismatch);
     }
 
-    std::fs::write(&cache_path, &data)?;
+    // Staged and renamed, so a concurrent fetch never reads a half-written module.
+    let staging_path = cache_path.with_extension(format!(
+        "{}.{}.partial",
+        std::process::id(),
+        STAGING_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::write(&staging_path, &data)?;
+    std::fs::rename(&staging_path, &cache_path)?;
     Ok(cache_path)
 }
 
