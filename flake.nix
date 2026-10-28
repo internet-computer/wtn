@@ -16,8 +16,8 @@
           inherit system overlays;
         };
         rustToolchain = pkgs.pkgsBuildHost.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
-        patchPrebuilt = pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.autoPatchelfHook ];
-        prebuiltLibs = pkgs.lib.optionals pkgs.stdenv.isLinux (with pkgs; [
+        patchPrebuilt = pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.autoPatchelfHook ];
+        prebuiltLibs = pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux (with pkgs; [
           stdenv.cc.cc.lib
           zlib
           openssl
@@ -26,8 +26,8 @@
           name = "ic-wasm";
           version = "0.9.3";
           src = pkgs.fetchurl {
-            url = "https://github.com/dfinity/ic-wasm/releases/download/${version}/ic-wasm-x86_64-${if pkgs.stdenv.isDarwin then "apple-darwin" else "unknown-linux-gnu"}.tar.gz";
-            sha256 = if pkgs.stdenv.isDarwin
+            url = "https://github.com/dfinity/ic-wasm/releases/download/${version}/ic-wasm-x86_64-${if pkgs.stdenv.hostPlatform.isDarwin then "apple-darwin" else "unknown-linux-gnu"}.tar.gz";
+            sha256 = if pkgs.stdenv.hostPlatform.isDarwin
               then "sha256-WmHu3peNyJMcbdPAVbwic5+42K3eHyFv49y/QCdPe/M="
               else "sha256-WSj7x+uKUP6Bcoyk2HPLCr3MJRHW7DRPy2V++r8HWX0=";
           };
@@ -56,7 +56,7 @@
               inherit (quillAssets.${system}) sha256;
             };
             nativeBuildInputs = patchPrebuilt;
-            buildInputs = prebuiltLibs ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.udev ];
+            buildInputs = prebuiltLibs ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.udev ];
             dontUnpack = true;
             installPhase = ''
               mkdir -p $out/bin
@@ -94,8 +94,8 @@
           name = "pocket-ic";
           version = "16.1.0";
           src = pkgs.fetchurl {
-            url = "https://github.com/dfinity/pocketic/releases/download/${version}/pocket-ic-x86_64-${if pkgs.stdenv.isDarwin then "darwin" else "linux"}.gz";
-            sha256 = if pkgs.stdenv.isDarwin
+            url = "https://github.com/dfinity/pocketic/releases/download/${version}/pocket-ic-x86_64-${if pkgs.stdenv.hostPlatform.isDarwin then "darwin" else "linux"}.gz";
+            sha256 = if pkgs.stdenv.hostPlatform.isDarwin
               then "sha256-r5rS14FTCkNVbvLRyPk9uZokJcbKvceFIPYZIjme1TA="
               else "sha256-ExIZ2Q3Pm/bz7Y7gLY9VUE6iSm2zgvVoBnW3vWt+078=";
           };
