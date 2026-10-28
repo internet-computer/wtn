@@ -28,7 +28,7 @@ async fn e2e_basic() {
     let icp_to_wrap = 100 * E8S;
     let neuron_id = nns_claim_or_refresh_neuron(&mut env, caller, 0).await;
 
-    env.advance_time_and_tick(MIN_DISSOLVE_DELAY_FOR_REWARDS.into())
+    env.advance_time_and_tick(MIN_DISSOLVE_DELAY_FOR_REWARDS)
         .await;
 
     let caller_icp_balance_before_withdrawal = env.balance_of(env.icp_ledger_id, caller.0).await;
@@ -66,7 +66,7 @@ async fn e2e_basic() {
     // ... + SplitNeuron + StartedToDissolve
     assert_eq!(env.get_events().await.total_event_count, 8);
 
-    env.advance_time_and_tick(MIN_DISSOLVE_DELAY_FOR_REWARDS.into())
+    env.advance_time_and_tick(MIN_DISSOLVE_DELAY_FOR_REWARDS)
         .await;
 
     assert_eq!(env.get_withdrawal_requests(caller.0).await.len(), 1);
@@ -92,7 +92,7 @@ async fn e2e_basic() {
         env.balance_of(
             env.icp_ledger_id,
             Account {
-                owner: env.water_neuron_id.into(),
+                owner: env.water_neuron_id,
                 subaccount: Some([1; 32])
             }
         )
@@ -125,7 +125,7 @@ async fn e2e_basic() {
         env.balance_of(
             env.icp_ledger_id,
             Account {
-                owner: env.water_neuron_id.into(),
+                owner: env.water_neuron_id,
                 subaccount: Some(SNS_GOVERNANCE_SUBACCOUNT)
             }
         )

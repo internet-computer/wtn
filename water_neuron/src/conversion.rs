@@ -14,8 +14,8 @@ use crate::{
 use candid::Nat;
 use ic_canister_log::log;
 use ic_nns_governance_api::{
-    manage_neuron_response::Command as CommandResponse,
-    manage_neuron_response::ConfigureResponse, manage_neuron_response::MergeResponse,
+    manage_neuron_response::Command as CommandResponse, manage_neuron_response::ConfigureResponse,
+    manage_neuron_response::MergeResponse,
 };
 use icrc_ledger_client_cdk::{CdkRuntime, ICRC1Client};
 use icrc_ledger_types::icrc1::account::Account;

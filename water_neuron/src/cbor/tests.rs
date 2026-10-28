@@ -49,7 +49,7 @@ prop_compose! {
     ) -> Account {
         Account {
             owner,
-            subaccount: subaccount,
+            subaccount,
         }
     }
 }

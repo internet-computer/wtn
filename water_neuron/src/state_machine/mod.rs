@@ -171,7 +171,7 @@ async fn nns_claim_or_refresh_neuron(
         manage_neuron::ClaimOrRefresh {
             by: Some(claim_or_refresh::By::MemoAndController(MemoAndController {
                 memo,
-                controller: Some(controller.into()),
+                controller: Some(controller),
             })),
         },
     ));
@@ -343,7 +343,7 @@ impl SnsTestsInitPayloadBuilder {
         let mut neuron_map = BTreeMap::new();
         for neuron in neurons {
             neuron_map.insert(
-                format!("{}", hex::encode(neuron.id.as_ref().unwrap().id.clone())),
+                hex::encode(neuron.id.as_ref().unwrap().id.clone()),
                 neuron,
             );
         }
@@ -570,7 +570,7 @@ impl WaterNeuron {
 
         let mut initial_balances = HashMap::new();
         initial_balances.insert(
-            AccountIdentifier::new(minter.into(), None),
+            AccountIdentifier::new(minter, None),
             Tokens::from_e8s(22_000_000 * E8S),
         );
         initial_balances.insert(
@@ -649,7 +649,7 @@ impl WaterNeuron {
                 }],
                 cached_neuron_stake_e8s: 10_000_000_000_000,
                 dissolve_state: Some(DissolveState::DissolveDelaySeconds(
-                    12 * crate::ONE_MONTH_SECONDS as u64,
+                    12 * crate::ONE_MONTH_SECONDS,
                 )),
                 voting_power_percentage_multiplier: 100,
                 ..Default::default()
@@ -669,7 +669,7 @@ impl WaterNeuron {
                 cmc_wasm().await,
                 Encode!(&Some(CyclesCanisterInitPayload {
                     ledger_canister_id: Some(LEDGER_CANISTER_ID),
-                    governance_canister_id: Some(GOVERNANCE_CANISTER_ID.into()),
+                    governance_canister_id: Some(GOVERNANCE_CANISTER_ID),
                     exchange_rate_canister: None,
                     minting_account_id: Some(GOVERNANCE_CANISTER_ID.into()),
                     last_purged_notification: Some(1),
@@ -1152,7 +1152,7 @@ async fn init_wtn_withdrawal_setup(wtn: &mut WaterNeuron) {
     assert_eq!(
         wtn.balance_of(wtn.icp_ledger_id, info.neuron_6m_account)
             .await,
-        Nat::from(wtn_6m_start_icp_balance + icp_to_wrap)
+        wtn_6m_start_icp_balance + icp_to_wrap
     );
     assert_eq!(
         wtn.balance_of(wtn.nicp_ledger_id, caller.0).await,

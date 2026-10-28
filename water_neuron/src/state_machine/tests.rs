@@ -423,7 +423,7 @@ async fn should_mirror_proposal() {
     let mut water_neuron = WaterNeuron::new().await;
     water_neuron.with_voting_topic().await;
 
-    let water_neuron_principal: Principal = water_neuron.water_neuron_id.into();
+    let water_neuron_principal: Principal = water_neuron.water_neuron_id;
     let caller = PrincipalId::new_user_test_id(212);
 
     water_neuron.advance_time_and_tick(50).await;
@@ -705,7 +705,7 @@ async fn should_distribute_icp_to_sns_neurons() {
             .transfer(
                 water_neuron.minter,
                 Account {
-                    owner: water_neuron.water_neuron_id.into(),
+                    owner: water_neuron.water_neuron_id,
                     subaccount: Some(SNS_GOVERNANCE_SUBACCOUNT)
                 },
                 100 * E8S,
@@ -720,7 +720,7 @@ async fn should_distribute_icp_to_sns_neurons() {
             .balance_of(
                 water_neuron.icp_ledger_id,
                 Account {
-                    owner: water_neuron.water_neuron_id.into(),
+                    owner: water_neuron.water_neuron_id,
                     subaccount: Some(SNS_GOVERNANCE_SUBACCOUNT),
                 }
             )
@@ -773,7 +773,7 @@ async fn should_distribute_icp_to_sns_neurons() {
 
     water_neuron
         .approve(
-            water_neuron.minter.into(),
+            water_neuron.minter,
             water_neuron.icp_ledger_id,
             water_neuron.water_neuron_id.into(),
         )
@@ -781,7 +781,7 @@ async fn should_distribute_icp_to_sns_neurons() {
 
     assert!(
         water_neuron
-            .icp_to_nicp(water_neuron.minter.into(), 21_000_000 * E8S)
+            .icp_to_nicp(water_neuron.minter, 21_000_000 * E8S)
             .await
             .is_ok()
     );
@@ -909,7 +909,7 @@ async fn should_compute_exchange_rate() {
     let total_event_count = water_neuron.get_events().await.total_event_count;
     assert_eq!(total_event_count, 3);
 
-    let water_neuron_principal: Principal = water_neuron.water_neuron_id.into();
+    let water_neuron_principal: Principal = water_neuron.water_neuron_id;
 
     assert_eq!(
         water_neuron
@@ -953,7 +953,7 @@ async fn should_compute_exchange_rate() {
 
     water_neuron.advance_time_and_tick(70).await;
 
-    let water_neuron_principal: Principal = water_neuron.water_neuron_id.into();
+    let water_neuron_principal: Principal = water_neuron.water_neuron_id;
 
     assert_eq!(
         water_neuron
@@ -1028,7 +1028,7 @@ async fn should_mirror_all_proposals() {
     let mut water_neuron = WaterNeuron::new().await;
     water_neuron.with_voting_topic().await;
 
-    let water_neuron_principal: Principal = water_neuron.water_neuron_id.into();
+    let water_neuron_principal: Principal = water_neuron.water_neuron_id;
     let caller = PrincipalId::new_user_test_id(212);
 
     assert_eq!(
@@ -1297,7 +1297,10 @@ async fn should_restore_min_dissolve_delay_after_stop_dissolving() {
         neuron::DissolveState::DissolveDelaySeconds(d) => d,
         other => panic!("expected a stopped neuron, got {other:?}"),
     };
-    assert!(frozen < MIN_DISSOLVE_DELAY_FOR_REWARDS, "frozen at {frozen}");
+    assert!(
+        frozen < MIN_DISSOLVE_DELAY_FOR_REWARDS,
+        "frozen at {frozen}"
+    );
 
     water_neuron
         .main_neuron_call(
@@ -1421,7 +1424,9 @@ async fn should_not_raise_main_neuron_dissolve_delay_on_cancel_withdrawal() {
 
     // SNS proposal 10324: the main neuron is stopped once it is deep into its dissolve. The
     // withdrawal neuron has been counting down alongside it, so neither sits far above the other.
-    water_neuron.advance_time_and_tick(5 * ONE_MONTH_SECONDS).await;
+    water_neuron
+        .advance_time_and_tick(5 * ONE_MONTH_SECONDS)
+        .await;
     water_neuron
         .main_neuron_call("stop_dissolving_main_neuron", SIX_MONTHS_NEURON_NONCE)
         .await

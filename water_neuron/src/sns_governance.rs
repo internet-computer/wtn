@@ -375,7 +375,7 @@ mod test {
 
         runtime
             .expect_list_neurons()
-            .withf(move |arg| arg.start_page_at == None)
+            .withf(move |arg| arg.start_page_at.is_none())
             .times(1)
             .return_const(Ok(ListNeuronsResponse {
                 neurons: neurons.iter().take(10).cloned().collect(),
@@ -471,7 +471,7 @@ mod test {
 
         runtime
             .expect_list_neurons()
-            .withf(move |arg| arg.start_page_at == None)
+            .withf(move |arg| arg.start_page_at.is_none())
             .times(1)
             .return_const(Ok(ListNeuronsResponse { neurons }));
         runtime

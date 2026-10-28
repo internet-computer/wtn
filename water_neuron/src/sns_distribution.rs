@@ -139,11 +139,9 @@ pub mod test {
                     } else if actual_sum < sum {
                         *x += 1;
                         actual_sum += 1;
-                    } else {
-                        if *x > 0 {
-                            *x -= 1;
-                            actual_sum -= 1;
-                        }
+                    } else if *x > 0 {
+                        *x -= 1;
+                        actual_sum -= 1;
                     }
                 }
             }
