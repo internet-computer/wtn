@@ -50,6 +50,25 @@ pub async fn cancel_withdrawal(
         return Err(CancelWithdrawalError::TooLate);
     }
 
+    // Ownership is settled before the main neuron is read: the dissolve delay check below reports
+    // both neurons' remaining delays, which a caller who does not own this withdrawal has no claim
+    // to, and it costs a second governance call that a rejected caller never needs.
+    let icp_due = match read_state(|s| {
+        s.neuron_id_to_withdrawal_id
+            .get(&neuron_id)
+            .and_then(|withdrawal_id| s.withdrawal_id_to_request.get(withdrawal_id).cloned())
+    }) {
+        Some(withdrawal_request) => {
+            if withdrawal_request.receiver != caller.into() {
+                return Err(CancelWithdrawalError::BadCaller {
+                    message: "Caller is not the owner.".to_string(),
+                });
+            }
+            withdrawal_request.icp_due
+        }
+        None => return Err(CancelWithdrawalError::RequestNotFound),
+    };
+
     // An NNS merge gives the target `max(source, target)` dissolve delay. A withdrawal neuron split
     // off the main neuron before it dissolved further therefore drags the main neuron back up to
     // its own delay, lengthening every other withdrawal. Such a request has to run to disbursement
@@ -68,22 +87,6 @@ pub async fn cancel_withdrawal(
             ),
         });
     }
-
-    let icp_due = match read_state(|s| {
-        s.neuron_id_to_withdrawal_id
-            .get(&neuron_id)
-            .and_then(|withdrawal_id| s.withdrawal_id_to_request.get(withdrawal_id).cloned())
-    }) {
-        Some(withdrawal_request) => {
-            if withdrawal_request.receiver != caller.into() {
-                return Err(CancelWithdrawalError::BadCaller {
-                    message: "Caller is not the owner.".to_string(),
-                });
-            }
-            withdrawal_request.icp_due
-        }
-        None => return Err(CancelWithdrawalError::RequestNotFound),
-    };
 
     log!(
         DEBUG,

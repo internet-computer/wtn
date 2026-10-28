@@ -19,9 +19,11 @@ jobs:
       - name: Run `cargo clippy` and `cargo fmt`
         run: |
           nix develop -i -k HOME -c bash -c "cargo clippy --all-targets && cargo fmt --check"
+      # One test thread at a time: every state machine test spins up its own PocketIC replica, and
+      # several of those at once exhaust the runner's memory, which kills the server mid-test.
       - name: Run tests
         run: |
-          nix develop -i -k HOME -c bash -c "cargo test --locked"
+          nix develop -i -k HOME -c bash -c "cargo test --locked -- --test-threads=1"
       - name: Compile canisters
         run: ./build.sh
       - name: Upload artifacts
