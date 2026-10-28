@@ -756,18 +756,18 @@ async fn should_distribute_icp_to_sns_neurons() {
     {
         let pic = water_neuron.env.lock().await;
         let water_neuron_id = water_neuron.water_neuron_id;
-        assert_eq!(
+        // The replica wraps the trap in a message whose wording and documentation link change
+        // between releases, so match on the trap text itself.
+        assert_matches!(
             update::<Result<u64, ConversionError>>(
                 &pic,
                 water_neuron_id,
                 caller.into(),
                 "claim_airdrop",
                 caller
-            ).await,
-            Err(
-                format!("Failed to call claim_airdrop of {water_neuron_id} with error: PocketIC returned a rejection error: reject code CanisterError, reject message Error from Canister {water_neuron_id}: Canister called `ic0.trap` with message: 'all rewards must be allocated before being claimable'.\nConsider gracefully handling failures from this canister or altering the canister to handle exceptions. See documentation: https://internetcomputer.org/docs/current/references/execution-errors#trapped-explicitly, error code CanisterCalledTrap")
-                .to_string()
             )
+            .await,
+            Err(error) if error.contains("all rewards must be allocated before being claimable")
         );
     }
 

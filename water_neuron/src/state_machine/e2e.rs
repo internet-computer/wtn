@@ -172,13 +172,15 @@ async fn e2e_basic() {
         "{neuron_6m_stake_e8s_before_proposal} not less than {neuron_6m_stake_e8s_after_proposal}"
     );
 
+    // 8x setup: Init, NeuronSixMonths, NeuronEightYears, IcpDeposit, NIcpWithdrawal, SplitNeuron,
+    //           StartedToDissolve, DisbursedUserNeuron
     // + 8x MirroredProposal
-    // + 11x MaturityNeuron (6x SnsGovernanceEightYears, 5x NICPSixMonths)
-    // + 7x DisbursedMaturityNeuron
-    // + 7x DispatchICPRewards
-    // + 14x TransferExecuted
+    // + 12x MaturityNeuron (4 are still inside the 7-day spawn delay here)
+    // + 8x DisbursedMaturityNeuron
+    // + 8x DispatchICPRewards, one per disbursed maturity neuron
+    // + 17x TransferExecuted: 2 per reward dispatch, plus 1 for the user's disbursed withdrawal
     // + 2x DistributeICPtoSNSv2
-    assert_eq!(env.get_events().await.total_event_count, 58);
+    assert_eq!(env.get_events().await.total_event_count, 63);
 
     assert!(
         env.get_events()
@@ -201,7 +203,7 @@ async fn e2e_basic() {
             .map(|e| &e.payload)
             .filter(|payload| matches!(payload, DisbursedMaturityNeuron { .. }))
             .count(),
-        7
+        8
     );
 
     let info = env.get_info().await;
@@ -210,7 +212,7 @@ async fn e2e_basic() {
             .await,
         Nat::from(info.tracked_6m_stake.0)
     );
-    assert_eq!(info.exchange_rate, 0_00_106_010);
+    assert_eq!(info.exchange_rate, 0_00_061_916);
 
     assert_eq!(info.nicp_share_percent, 10);
     assert_eq!(info.governance_share_percent, 10);
@@ -249,18 +251,18 @@ async fn e2e_basic() {
         Nat::from(info.tracked_6m_stake.0)
     );
     assert_eq!(info.neuron_6m_stake_e8s, info.tracked_6m_stake);
-    assert_eq!(info.exchange_rate, 0_00_106_010);
+    assert_eq!(info.exchange_rate, 0_00_061_916);
     assert_eq!(info.nicp_share_percent, 20);
     assert_eq!(info.governance_share_percent, 10);
 
     assert_eq!(
         env.icp_to_nicp(caller, E8S).await.unwrap().nicp_amount,
-        Some(nICP::from_e8s(0_00_106_010))
+        Some(nICP::from_e8s(0_00_061_916))
     );
 
     assert_eq!(
         env.nicp_to_icp(caller, E8S).await.unwrap().icp_amount,
-        Some(ICP::from_e8s(943_30_534_079))
+        Some(ICP::from_e8s(1615_09_344_906))
     );
 
     assert_eq!(
@@ -289,5 +291,6 @@ async fn e2e_basic() {
     };
 
     let full_neuron = env.get_full_neuron(neuron_id.id).await.unwrap().unwrap();
-    assert_eq!(full_neuron.cached_neuron_stake_e8s, 943_30_524_079);
+    // The withdrawal amount above, less the 0.0001 ICP ledger fee charged on the split.
+    assert_eq!(full_neuron.cached_neuron_stake_e8s, 1615_09_334_906);
 }

@@ -213,7 +213,10 @@ impl BoomerangSetup {
                     .with_minting_account(water_neuron_id)
                     .with_transfer_fee(TRANSFER_FEE)
                     .with_decimals(8)
-                    .with_feature_flags(ic_icrc1_ledger::FeatureFlags { icrc2: true })
+                    .with_feature_flags(ic_icrc1_ledger::FeatureFlags {
+                        icrc2: true,
+                        ..Default::default()
+                    })
                     .build(),
             ))
             .unwrap(),

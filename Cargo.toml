@@ -44,7 +44,7 @@ minicbor-derive = "0.15.0"
 mockall = "0.12.1"
 num-bigint = "0.4.4"
 num-traits = "0.2.18"
-pocket-ic = "12.0.0"
+pocket-ic = "16.1.0"
 proptest = "1.5.0"
 prost = "0.12.6"
 regex = "1.10.5"
@@ -63,20 +63,20 @@ tokio = { version = "1.38.0", features = ["full"] }
 cargo_metadata = "0.19.1"
 
 # DFINITY IC dependencies 
-cycles-minting-canister = { git = "https://github.com/dfinity/ic.git", rev = "035a2c7a2b19bc7ce7c4d977169583eb64b0e3cb" }
-ic-base-types = { git = "https://github.com/dfinity/ic", rev = "035a2c7a2b19bc7ce7c4d977169583eb64b0e3cb" }
-ic-icrc1-ledger = { git = "https://github.com/dfinity/ic.git", rev = "035a2c7a2b19bc7ce7c4d977169583eb64b0e3cb" }
-ic-management-canister-types-private = { git = "https://github.com/dfinity/ic.git", rev = "035a2c7a2b19bc7ce7c4d977169583eb64b0e3cb" }
-ic-nns-constants = { git = "https://github.com/dfinity/ic.git", rev = "035a2c7a2b19bc7ce7c4d977169583eb64b0e3cb" }
-ic-nns-common = { git = "https://github.com/dfinity/ic.git", rev = "035a2c7a2b19bc7ce7c4d977169583eb64b0e3cb" }
-ic-nns-governance = { git = "https://github.com/dfinity/ic.git", rev = "035a2c7a2b19bc7ce7c4d977169583eb64b0e3cb" }
-ic-nns-governance-api = { git = "https://github.com/dfinity/ic.git", rev = "035a2c7a2b19bc7ce7c4d977169583eb64b0e3cb" }
-ic-sns-governance = { git = "https://github.com/dfinity/ic", rev = "035a2c7a2b19bc7ce7c4d977169583eb64b0e3cb" }
-ic-sns-governance-api = { git = "https://github.com/dfinity/ic", rev = "035a2c7a2b19bc7ce7c4d977169583eb64b0e3cb" }
-ic-sns-init = { git = "https://github.com/dfinity/ic.git", rev =  "035a2c7a2b19bc7ce7c4d977169583eb64b0e3cb"}
-ic-sns-root = { git = "https://github.com/dfinity/ic.git", rev =  "035a2c7a2b19bc7ce7c4d977169583eb64b0e3cb"}
-ic-sns-swap = { git = "https://github.com/dfinity/ic.git", rev = "035a2c7a2b19bc7ce7c4d977169583eb64b0e3cb" }
-ic-utils-ensure = { git = "https://github.com/dfinity/ic", rev = "035a2c7a2b19bc7ce7c4d977169583eb64b0e3cb"}
-icp-ledger = { git = "https://github.com/dfinity/ic", rev =  "035a2c7a2b19bc7ce7c4d977169583eb64b0e3cb"}
-icrc-ledger-client-cdk = { git = "https://github.com/dfinity/ic", rev =  "035a2c7a2b19bc7ce7c4d977169583eb64b0e3cb"}
-icrc-ledger-types = { git = "https://github.com/dfinity/ic", rev =  "035a2c7a2b19bc7ce7c4d977169583eb64b0e3cb"}
+cycles-minting-canister = { git = "https://github.com/dfinity/ic.git", rev = "98c898f8de068a1fc0e97ebc805f9fa7f315d862" }
+ic-base-types = { git = "https://github.com/dfinity/ic", rev = "98c898f8de068a1fc0e97ebc805f9fa7f315d862" }
+ic-icrc1-ledger = { git = "https://github.com/dfinity/ic.git", rev = "98c898f8de068a1fc0e97ebc805f9fa7f315d862" }
+ic-management-canister-types-private = { git = "https://github.com/dfinity/ic.git", rev = "98c898f8de068a1fc0e97ebc805f9fa7f315d862" }
+ic-nns-constants = { git = "https://github.com/dfinity/ic.git", rev = "98c898f8de068a1fc0e97ebc805f9fa7f315d862" }
+ic-nns-common = { git = "https://github.com/dfinity/ic.git", rev = "98c898f8de068a1fc0e97ebc805f9fa7f315d862" }
+ic-nns-governance = { git = "https://github.com/dfinity/ic.git", rev = "98c898f8de068a1fc0e97ebc805f9fa7f315d862" }
+ic-nns-governance-api = { git = "https://github.com/dfinity/ic.git", rev = "98c898f8de068a1fc0e97ebc805f9fa7f315d862" }
+ic-sns-governance = { git = "https://github.com/dfinity/ic", rev = "98c898f8de068a1fc0e97ebc805f9fa7f315d862" }
+ic-sns-governance-api = { git = "https://github.com/dfinity/ic", rev = "98c898f8de068a1fc0e97ebc805f9fa7f315d862" }
+ic-sns-init = { git = "https://github.com/dfinity/ic.git", rev =  "98c898f8de068a1fc0e97ebc805f9fa7f315d862"}
+ic-sns-root = { git = "https://github.com/dfinity/ic.git", rev =  "98c898f8de068a1fc0e97ebc805f9fa7f315d862"}
+ic-sns-swap = { git = "https://github.com/dfinity/ic.git", rev = "98c898f8de068a1fc0e97ebc805f9fa7f315d862" }
+ic-utils-ensure = { git = "https://github.com/dfinity/ic", rev = "98c898f8de068a1fc0e97ebc805f9fa7f315d862"}
+icp-ledger = { git = "https://github.com/dfinity/ic", rev =  "98c898f8de068a1fc0e97ebc805f9fa7f315d862"}
+icrc-ledger-client-cdk = { git = "https://github.com/dfinity/ic", rev =  "98c898f8de068a1fc0e97ebc805f9fa7f315d862"}
+icrc-ledger-types = { git = "https://github.com/dfinity/ic", rev =  "98c898f8de068a1fc0e97ebc805f9fa7f315d862"}

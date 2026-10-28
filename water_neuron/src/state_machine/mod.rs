@@ -2,8 +2,8 @@ use crate::state::event::{GetEventsArg, GetEventsResult};
 use crate::state::{TransferStatus, WithdrawalDetails};
 use crate::{
     CancelWithdrawalError, CanisterInfo, ConversionArg, ConversionError, DEFAULT_LEDGER_FEE,
-    DepositSuccess, E8S, INITIAL_NEURON_STAKE, InitArg, LiquidArg, NEURON_LEDGER_FEE, NeuronId,
-    WithdrawalSuccess, compute_neuron_staking_subaccount_bytes, nICP,
+    DepositSuccess, E8S, INITIAL_NEURON_STAKE, InitArg, LiquidArg, MIN_DISSOLVE_DELAY_FOR_REWARDS,
+    NEURON_LEDGER_FEE, NeuronId, WithdrawalSuccess, compute_neuron_staking_subaccount_bytes, nICP,
 };
 use assert_matches::assert_matches;
 use candid::{CandidType, Deserialize, Encode, Nat, Principal};
@@ -17,6 +17,7 @@ use ic_nns_constants::{CYCLES_LEDGER_CANISTER_ID, GOVERNANCE_CANISTER_ID, LEDGER
 use ic_nns_governance_api::{
     Governance, GovernanceError, MakeProposalRequest, ManageNeuronCommandRequest,
     ManageNeuronRequest, ManageNeuronResponse, NetworkEconomics, Neuron, ProposalInfo,
+    VotingPowerEconomics,
     manage_neuron::{
         self,
         claim_or_refresh::{self, MemoAndController},
@@ -608,7 +609,18 @@ impl WaterNeuron {
             GOVERNANCE_CANISTER_ID.into(),
             governance_wasm().await,
             Encode!(&Governance {
-                economics: Some(NetworkEconomics::with_default_values()),
+                economics: Some(NetworkEconomics {
+                    // Mainnet lowered the vote-eligibility floor to two weeks, the delay the main
+                    // neuron sits at. The code default is still six months, under which the main
+                    // neuron is left out of every proposal's ballots and can never vote.
+                    voting_power_economics: Some(VotingPowerEconomics {
+                        neuron_minimum_dissolve_delay_to_vote_seconds: Some(
+                            MIN_DISSOLVE_DELAY_FOR_REWARDS
+                        ),
+                        ..VotingPowerEconomics::with_default_values()
+                    }),
+                    ..NetworkEconomics::with_default_values()
+                }),
                 wait_for_quiet_threshold_seconds: 60 * 60 * 24 * 4, // 4 days
                 short_voting_period_seconds: 60 * 60 * 12,          // 12 hours
                 neuron_management_voting_period_seconds: Some(60 * 60 * 48), // 48 hours
@@ -704,7 +716,10 @@ impl WaterNeuron {
                     .with_minting_account(water_neuron_canister_id)
                     .with_transfer_fee(DEFAULT_LEDGER_FEE)
                     .with_decimals(8)
-                    .with_feature_flags(ic_icrc1_ledger::FeatureFlags { icrc2: true })
+                    .with_feature_flags(ic_icrc1_ledger::FeatureFlags {
+                        icrc2: true,
+                        ..Default::default()
+                    })
                     .build(),
             ))
             .unwrap(),
