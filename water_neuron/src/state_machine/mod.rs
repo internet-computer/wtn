@@ -1037,6 +1037,21 @@ impl WaterNeuron {
         .unwrap_or_else(|e| panic!("failed to call {method}: {e:?}"))
     }
 
+    /// Freezes a withdrawal neuron's dissolve, as a failed cancel used to. `self_check` only.
+    async fn park_withdrawal_neuron(
+        &self,
+        neuron_id: NeuronId,
+    ) -> Result<ManageNeuronResponse, String> {
+        self.update::<Result<ManageNeuronResponse, String>>(
+            PrincipalId::from(Principal::anonymous()),
+            self.water_neuron_id,
+            "park_withdrawal_neuron",
+            neuron_id,
+        )
+        .await
+        .expect("failed to call park_withdrawal_neuron")
+    }
+
     async fn get_info(&self) -> CanisterInfo {
         self.query::<CanisterInfo>(self.water_neuron_id, "get_info", Encode!().unwrap())
             .await

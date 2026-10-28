@@ -24,6 +24,17 @@ use icrc_ledger_types::icrc2::transfer_from::TransferFromArgs;
 pub const MINIMUM_DEPOSIT_AMOUNT: ICP = ICP::ONE;
 pub const MINIMUM_WITHDRAWAL_AMOUNT: ICP = ICP::from_unscaled(10);
 
+/// Seconds until the neuron reaches a zero dissolve delay, whether it is dissolving or stopped.
+async fn time_left_of(neuron_id: NeuronId) -> Result<u64, CancelWithdrawalError> {
+    let neuron = get_full_neuron(neuron_id.id)
+        .await
+        .map_err(|message| CancelWithdrawalError::GetFullNeuronError { message })?
+        .map_err(CancelWithdrawalError::GovernanceError)?;
+
+    time_left_seconds(&neuron, timestamp_nanos() / crate::SEC_NANOS)
+        .ok_or(CancelWithdrawalError::UnknownTimeLeft)
+}
+
 pub async fn cancel_withdrawal(
     neuron_id: NeuronId,
 ) -> Result<MergeResponse, CancelWithdrawalError> {
@@ -31,21 +42,31 @@ pub async fn cancel_withdrawal(
     let _guard_principal = GuardPrincipal::new(caller)
         .map_err(|guard_error| CancelWithdrawalError::GuardError { guard_error })?;
 
-    match get_full_neuron(neuron_id.id).await {
-        Ok(result) => match result {
-            Ok(neuron) => match time_left_seconds(&neuron, timestamp_nanos() / crate::SEC_NANOS) {
-                Some(time) => {
-                    // Buffer against the disbursement timer, scaled to the two-week delay: the
-                    // old fourteen days covered the whole window.
-                    if time < ONE_DAY_SECONDS {
-                        return Err(CancelWithdrawalError::TooLate);
-                    }
-                }
-                None => return Err(CancelWithdrawalError::UnknownTimeLeft),
-            },
-            Err(gov_err) => return Err(CancelWithdrawalError::GovernanceError(gov_err)),
-        },
-        Err(error) => return Err(CancelWithdrawalError::GetFullNeuronError { message: error }),
+    let time_left = time_left_of(neuron_id).await?;
+
+    // Buffer against the disbursement timer, scaled to the two-week delay: the old fourteen days
+    // covered the whole window.
+    if time_left < ONE_DAY_SECONDS {
+        return Err(CancelWithdrawalError::TooLate);
+    }
+
+    // An NNS merge gives the target `max(source, target)` dissolve delay. A withdrawal neuron split
+    // off the main neuron before it dissolved further therefore drags the main neuron back up to
+    // its own delay, lengthening every other withdrawal. Such a request has to run to disbursement
+    // instead of being cancelled.
+    let main_neuron_id =
+        read_state(|s| s.neuron_id_6m).ok_or_else(|| CancelWithdrawalError::GenericError {
+            code: 0,
+            message: "main neuron is not set".to_string(),
+        })?;
+    let main_time_left = time_left_of(main_neuron_id).await?;
+    if time_left > main_time_left {
+        return Err(CancelWithdrawalError::GenericError {
+            code: 1,
+            message: format!(
+                "cancelling would raise the main neuron dissolve delay from {main_time_left}s to {time_left}s"
+            ),
+        });
     }
 
     let icp_due = match read_state(|s| {
