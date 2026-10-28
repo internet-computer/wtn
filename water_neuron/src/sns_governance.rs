@@ -433,41 +433,42 @@ mod test {
             Principal::from_str("44bpz-wpk6f-zydao-ahpkm-dxl3b-kcx2w-b5qd5-tlhg4-3jh7i-ccf33-dae")
                 .unwrap();
 
-        let mut neurons: Vec<Neuron> = vec![];
-        neurons.push(Neuron {
-            id: Some(NeuronId {
-                id: compute_neuron_staking_subaccount_bytes(caller, 0).to_vec(),
-            }),
-            permissions: vec![NeuronPermission {
-                principal: Some(caller.into()),
-                permission_type: NeuronPermissionType::all(),
-            }],
-            cached_neuron_stake_e8s: E8S,
-            maturity_e8s_equivalent: E8S,
-            staked_maturity_e8s_equivalent: Some(E8S),
-            dissolve_state: Some(DissolveState::DissolveDelaySeconds(94_672_799)),
-            created_timestamp_seconds: 1_718_691_769,
-            aging_since_timestamp_seconds: 1_718_691_769,
-            voting_power_percentage_multiplier: 100,
-            ..Default::default()
-        });
-        neurons.push(Neuron {
-            id: Some(NeuronId {
-                id: compute_neuron_staking_subaccount_bytes(caller_2, 0).to_vec(),
-            }),
-            permissions: vec![NeuronPermission {
-                principal: Some(caller_2.into()),
-                permission_type: NeuronPermissionType::all(),
-            }],
-            cached_neuron_stake_e8s: E8S,
-            maturity_e8s_equivalent: E8S,
-            staked_maturity_e8s_equivalent: Some(E8S),
-            dissolve_state: Some(DissolveState::DissolveDelaySeconds(94_672_799)),
-            created_timestamp_seconds: 1_718_691_769,
-            aging_since_timestamp_seconds: 1_718_691_769,
-            voting_power_percentage_multiplier: 100,
-            ..Default::default()
-        });
+        let neurons: Vec<Neuron> = vec![
+            Neuron {
+                id: Some(NeuronId {
+                    id: compute_neuron_staking_subaccount_bytes(caller, 0).to_vec(),
+                }),
+                permissions: vec![NeuronPermission {
+                    principal: Some(caller.into()),
+                    permission_type: NeuronPermissionType::all(),
+                }],
+                cached_neuron_stake_e8s: E8S,
+                maturity_e8s_equivalent: E8S,
+                staked_maturity_e8s_equivalent: Some(E8S),
+                dissolve_state: Some(DissolveState::DissolveDelaySeconds(94_672_799)),
+                created_timestamp_seconds: 1_718_691_769,
+                aging_since_timestamp_seconds: 1_718_691_769,
+                voting_power_percentage_multiplier: 100,
+                ..Default::default()
+            },
+            Neuron {
+                id: Some(NeuronId {
+                    id: compute_neuron_staking_subaccount_bytes(caller_2, 0).to_vec(),
+                }),
+                permissions: vec![NeuronPermission {
+                    principal: Some(caller_2.into()),
+                    permission_type: NeuronPermissionType::all(),
+                }],
+                cached_neuron_stake_e8s: E8S,
+                maturity_e8s_equivalent: E8S,
+                staked_maturity_e8s_equivalent: Some(E8S),
+                dissolve_state: Some(DissolveState::DissolveDelaySeconds(94_672_799)),
+                created_timestamp_seconds: 1_718_691_769,
+                aging_since_timestamp_seconds: 1_718_691_769,
+                voting_power_percentage_multiplier: 100,
+                ..Default::default()
+            },
+        ];
 
         runtime
             .expect_list_neurons()

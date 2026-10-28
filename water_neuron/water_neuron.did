@@ -182,6 +182,7 @@ type Neuron = record {
   hot_keys : vec principal;
   account : blob;
   joined_community_fund_timestamp_seconds : opt nat64;
+  eight_year_gang_bonus_base_e8s : opt nat64;
   maturity_disbursements_in_progress : opt vec MaturityDisbursement;
   dissolve_state : opt DissolveState;
   followees : vec record { int32; Followees };
@@ -194,6 +195,7 @@ type Neuron = record {
 type NeuronId = record { id : nat64 };
 type NeuronInfo = record {
   id : opt NeuronId;
+  staked_maturity_e8s_equivalent : opt nat64;
   dissolve_delay_seconds : nat64;
   recent_ballots : vec BallotInfo;
   voting_power_refreshed_timestamp_seconds : opt nat64;
@@ -204,6 +206,7 @@ type NeuronInfo = record {
   state : int32;
   stake_e8s : nat64;
   joined_community_fund_timestamp_seconds : opt nat64;
+  eight_year_gang_bonus_base_e8s : opt nat64;
   retrieved_at_timestamp_seconds : nat64;
   visibility : opt int32;
   known_neuron_data : opt KnownNeuronData;

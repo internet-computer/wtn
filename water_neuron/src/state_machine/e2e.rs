@@ -1,3 +1,7 @@
+// Amounts are written in e8s with the integer part split from the eight decimals, so
+// `1615_09_344_906` reads as 1615.09344906 ICP. Clippy sees that as inconsistent grouping.
+#![allow(clippy::inconsistent_digit_grouping, clippy::zero_prefixed_literal)]
+
 use crate::EventType::{DisbursedMaturityNeuron, DisbursedUserNeuron};
 use crate::conversion::{MINIMUM_DEPOSIT_AMOUNT, MINIMUM_WITHDRAWAL_AMOUNT};
 use crate::state::{SNS_GOVERNANCE_SUBACCOUNT, WithdrawalStatus};

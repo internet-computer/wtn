@@ -1113,59 +1113,44 @@ async fn should_mirror_all_proposals() {
         Ok(_)
     );
 
-    let mut proposals = vec![];
+    let dummy_economics = || {
+        ProposalActionRequest::ManageNetworkEconomics(ic_nns_governance_api::NetworkEconomics {
+            reject_cost_e8s: 0,
+            neuron_minimum_stake_e8s: 0,
+            neuron_management_fee_per_proposal_e8s: 0,
+            minimum_icp_xdr_rate: 0,
+            neuron_spawn_dissolve_delay_seconds: 0,
+            maximum_node_provider_rewards_e8s: 0,
+            transaction_fee_e8s: 0,
+            max_proposals_to_keep_per_topic: 0,
+            voting_power_economics: None,
+            neurons_fund_economics: None,
+        })
+    };
+    let url = "https://forum.dfinity.org/t/reevaluating-neuron-control-restrictions/28597/215";
 
-    proposals.push(MakeProposalRequest {
-        title: Some("Dummy Motion".to_string()),
-        summary: "Dummy Proposal".to_string(),
-        url: "https://forum.dfinity.org/t/reevaluating-neuron-control-restrictions/28597/215"
-            .to_string(),
-        action: Some(ProposalActionRequest::Motion(Motion {
-            motion_text: "Some text".to_string(),
-        })),
-    });
-
-    proposals.push(MakeProposalRequest {
-        title: Some("Dummy ManageNetworkEconomics".to_string()),
-        summary: "Dummy Proposal".to_string(),
-        url: "https://forum.dfinity.org/t/reevaluating-neuron-control-restrictions/28597/215"
-            .to_string(),
-        action: Some(ProposalActionRequest::ManageNetworkEconomics(
-            ic_nns_governance_api::NetworkEconomics {
-                reject_cost_e8s: 0,
-                neuron_minimum_stake_e8s: 0,
-                neuron_management_fee_per_proposal_e8s: 0,
-                minimum_icp_xdr_rate: 0,
-                neuron_spawn_dissolve_delay_seconds: 0,
-                maximum_node_provider_rewards_e8s: 0,
-                transaction_fee_e8s: 0,
-                max_proposals_to_keep_per_topic: 0,
-                voting_power_economics: None,
-                neurons_fund_economics: None,
-            },
-        )),
-    });
-
-    proposals.push(MakeProposalRequest {
-        title: Some("Dummy ManageNetworkEconomics".to_string()),
-        summary: "Dummy Proposal".to_string(),
-        url: "https://forum.dfinity.org/t/reevaluating-neuron-control-restrictions/28597/215"
-            .to_string(),
-        action: Some(ProposalActionRequest::ManageNetworkEconomics(
-            ic_nns_governance_api::NetworkEconomics {
-                reject_cost_e8s: 0,
-                neuron_minimum_stake_e8s: 0,
-                neuron_management_fee_per_proposal_e8s: 0,
-                minimum_icp_xdr_rate: 0,
-                neuron_spawn_dissolve_delay_seconds: 0,
-                maximum_node_provider_rewards_e8s: 0,
-                transaction_fee_e8s: 0,
-                max_proposals_to_keep_per_topic: 0,
-                voting_power_economics: None,
-                neurons_fund_economics: None,
-            },
-        )),
-    });
+    let proposals = vec![
+        MakeProposalRequest {
+            title: Some("Dummy Motion".to_string()),
+            summary: "Dummy Proposal".to_string(),
+            url: url.to_string(),
+            action: Some(ProposalActionRequest::Motion(Motion {
+                motion_text: "Some text".to_string(),
+            })),
+        },
+        MakeProposalRequest {
+            title: Some("Dummy ManageNetworkEconomics".to_string()),
+            summary: "Dummy Proposal".to_string(),
+            url: url.to_string(),
+            action: Some(dummy_economics()),
+        },
+        MakeProposalRequest {
+            title: Some("Dummy ManageNetworkEconomics".to_string()),
+            summary: "Dummy Proposal".to_string(),
+            url: url.to_string(),
+            action: Some(dummy_economics()),
+        },
+    ];
 
     for proposal in proposals {
         let res = nns_governance_make_proposal(&mut water_neuron, caller, neuron_id, &proposal)

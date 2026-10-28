@@ -1,3 +1,7 @@
+// Amounts are written in e8s with the integer part split from the eight decimals, so
+// `99_99_990_000` reads as 99.9999 ICP. Clippy sees that as inconsistent grouping.
+#![allow(clippy::inconsistent_digit_grouping)]
+
 use crate::state::event::{GetEventsArg, GetEventsResult};
 use crate::state::{TransferStatus, WithdrawalDetails};
 use crate::{
@@ -343,10 +347,7 @@ impl SnsTestsInitPayloadBuilder {
     pub fn with_initial_neurons(&mut self, neurons: Vec<SnsNeuron>) -> &mut Self {
         let mut neuron_map = BTreeMap::new();
         for neuron in neurons {
-            neuron_map.insert(
-                hex::encode(neuron.id.as_ref().unwrap().id.clone()),
-                neuron,
-            );
+            neuron_map.insert(hex::encode(neuron.id.as_ref().unwrap().id.clone()), neuron);
         }
         self.governance.with_neurons(neuron_map);
         self
