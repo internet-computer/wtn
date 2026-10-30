@@ -131,6 +131,15 @@ fn check_invariants() -> Result<(), String> {
 #[query]
 pub fn self_check() {}
 
+/// Stops a withdrawal neuron's dissolve, the state a `cancel_withdrawal` whose merge failed used to
+/// leave behind. Mainnet still holds neurons parked that way, so the recovery path needs a way to
+/// reproduce it. Test builds only.
+#[cfg(feature = "self_check")]
+#[update(hidden = true)]
+async fn park_withdrawal_neuron(neuron_id: NeuronId) -> Result<ManageNeuronResponse, String> {
+    water_neuron::management::stop_dissolvement(neuron_id).await
+}
+
 fn check_postcondition<T>(t: T) -> T {
     #[cfg(feature = "self_check")]
     ok_or_die(check_invariants());

@@ -1,6 +1,6 @@
 use crate::guards::GuardPrincipal;
 use crate::logs::{DEBUG, INFO};
-use crate::management::{merge_neuron_into_six_months, stop_dissolvement};
+use crate::management::{merge_neuron_into_six_months, start_dissolving, stop_dissolvement};
 use crate::nns_types::{NeuronId, time_left_seconds};
 use crate::numeric::{ICP, nICP};
 use crate::state::audit::process_event;
@@ -14,7 +14,8 @@ use crate::{
 use candid::Nat;
 use ic_canister_log::log;
 use ic_nns_governance_api::{
-    manage_neuron_response::Command as CommandResponse, manage_neuron_response::MergeResponse,
+    manage_neuron_response::Command as CommandResponse, manage_neuron_response::ConfigureResponse,
+    manage_neuron_response::MergeResponse,
 };
 use icrc_ledger_client_cdk::{CdkRuntime, ICRC1Client};
 use icrc_ledger_types::icrc1::account::Account;
@@ -23,6 +24,17 @@ use icrc_ledger_types::icrc2::transfer_from::TransferFromArgs;
 pub const MINIMUM_DEPOSIT_AMOUNT: ICP = ICP::ONE;
 pub const MINIMUM_WITHDRAWAL_AMOUNT: ICP = ICP::from_unscaled(10);
 
+/// Seconds until the neuron reaches a zero dissolve delay, whether it is dissolving or stopped.
+async fn time_left_of(neuron_id: NeuronId) -> Result<u64, CancelWithdrawalError> {
+    let neuron = get_full_neuron(neuron_id.id)
+        .await
+        .map_err(|message| CancelWithdrawalError::GetFullNeuronError { message })?
+        .map_err(CancelWithdrawalError::GovernanceError)?;
+
+    time_left_seconds(&neuron, timestamp_nanos() / crate::SEC_NANOS)
+        .ok_or(CancelWithdrawalError::UnknownTimeLeft)
+}
+
 pub async fn cancel_withdrawal(
     neuron_id: NeuronId,
 ) -> Result<MergeResponse, CancelWithdrawalError> {
@@ -30,21 +42,17 @@ pub async fn cancel_withdrawal(
     let _guard_principal = GuardPrincipal::new(caller)
         .map_err(|guard_error| CancelWithdrawalError::GuardError { guard_error })?;
 
-    match get_full_neuron(neuron_id.id).await {
-        Ok(result) => match result {
-            Ok(neuron) => match time_left_seconds(&neuron, timestamp_nanos() / crate::SEC_NANOS) {
-                Some(time) => {
-                    if time < ONE_DAY_SECONDS * 14 {
-                        return Err(CancelWithdrawalError::TooLate);
-                    }
-                }
-                None => return Err(CancelWithdrawalError::UnknownTimeLeft),
-            },
-            Err(gov_err) => return Err(CancelWithdrawalError::GovernanceError(gov_err)),
-        },
-        Err(error) => return Err(CancelWithdrawalError::GetFullNeuronError { message: error }),
+    let time_left = time_left_of(neuron_id).await?;
+
+    // Buffer against the disbursement timer, scaled to the two-week delay: the old fourteen days
+    // covered the whole window.
+    if time_left < ONE_DAY_SECONDS {
+        return Err(CancelWithdrawalError::TooLate);
     }
 
+    // Ownership is settled before the main neuron is read: the dissolve delay check below reports
+    // both neurons' remaining delays, which a caller who does not own this withdrawal has no claim
+    // to, and it costs a second governance call that a rejected caller never needs.
     let icp_due = match read_state(|s| {
         s.neuron_id_to_withdrawal_id
             .get(&neuron_id)
@@ -61,15 +69,45 @@ pub async fn cancel_withdrawal(
         None => return Err(CancelWithdrawalError::RequestNotFound),
     };
 
+    // An NNS merge gives the target `max(source, target)` dissolve delay. A withdrawal neuron split
+    // off the main neuron before it dissolved further therefore drags the main neuron back up to
+    // its own delay, lengthening every other withdrawal. Such a request has to run to disbursement
+    // instead of being cancelled.
+    let main_neuron_id =
+        read_state(|s| s.neuron_id_6m).ok_or_else(|| CancelWithdrawalError::GenericError {
+            code: 0,
+            message: "main neuron is not set".to_string(),
+        })?;
+    let main_time_left = time_left_of(main_neuron_id).await?;
+    if time_left > main_time_left {
+        return Err(CancelWithdrawalError::GenericError {
+            code: 1,
+            message: format!(
+                "cancelling would raise the main neuron dissolve delay from {main_time_left}s to {time_left}s"
+            ),
+        });
+    }
+
     log!(
         DEBUG,
         "[cancel_withdrawal] Cancelling neuron with id {}, ICP due: {icp_due}",
         neuron_id.id
     );
 
-    let stop_dissolvement_result = stop_dissolvement(neuron_id)
-        .await
-        .map_err(|error_msg| CancelWithdrawalError::StopDissolvementError { message: error_msg });
+    // `manage_neuron` reports governance-level failures inside the response rather than as a call
+    // error, so the command has to be checked: a `StopDissolving` that governance refused must abort
+    // the cancel instead of falling through to a merge the caller never earned.
+    let stop_dissolvement_result = match stop_dissolvement(neuron_id).await {
+        Ok(response)
+            if response.command == Some(CommandResponse::Configure(ConfigureResponse {})) =>
+        {
+            Ok(())
+        }
+        Ok(response) => Err(CancelWithdrawalError::StopDissolvementError {
+            message: format!("{response:?}"),
+        }),
+        Err(error_msg) => Err(CancelWithdrawalError::StopDissolvementError { message: error_msg }),
+    };
 
     if stop_dissolvement_result.is_err() {
         log!(
@@ -80,6 +118,31 @@ pub async fn cancel_withdrawal(
 
     stop_dissolvement_result?;
 
+    let merge_result = merge_withdrawal_neuron(neuron_id).await;
+
+    if merge_result.is_err() {
+        // The `StopDissolving` above has already landed. Leaving it in place parks the neuron at a
+        // dissolve delay that never counts down, so the withdrawal could never disburse and a later
+        // retry would merge a neuron frozen high, dragging the main neuron's own delay up with it
+        // (an NNS merge takes `max(source, target)`). Restarting the dissolve restores the absolute
+        // timestamp the neuron had, give or take the latency of these two calls.
+        if let Err(error) = start_dissolving(neuron_id).await {
+            log!(
+                INFO,
+                "[cancel_withdrawal] Failed to restart the dissolvement of neuron {} after a failed \
+                 merge, it is parked and cannot disburse: {error:?}",
+                neuron_id.id
+            );
+        }
+    }
+
+    merge_result
+}
+
+/// Merges a stopped withdrawal neuron back into the main neuron and credits the caller.
+async fn merge_withdrawal_neuron(
+    neuron_id: NeuronId,
+) -> Result<MergeResponse, CancelWithdrawalError> {
     match merge_neuron_into_six_months(neuron_id)
         .await
         .map_err(|error_msg| CancelWithdrawalError::MergeNeuronError { message: error_msg })?

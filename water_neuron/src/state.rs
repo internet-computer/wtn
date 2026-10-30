@@ -1072,7 +1072,7 @@ pub mod test {
         let withdrawal_id = 0_u64;
         let neuron_id = NeuronId { id: 0 };
 
-        state.record_icp_deposit(caller.into(), ICP::from_unscaled(10), 0_64);
+        state.record_icp_deposit(caller.into(), ICP::from_unscaled(10), 0_u64);
         assert_eq!(
             state.get_withdrawal_status(withdrawal_id),
             WithdrawalStatus::NotFound

@@ -96,11 +96,11 @@ impl BoomerangSetup {
 
         let mut initial_balances = HashMap::new();
         initial_balances.insert(
-            AccountIdentifier::new(minter.into(), None),
+            AccountIdentifier::new(minter, None),
             Tokens::from_e8s(22_000_000 * E8S),
         );
         initial_balances.insert(
-            AccountIdentifier::new(caller.into(), None),
+            AccountIdentifier::new(caller, None),
             Tokens::from_e8s(1_000 * E8S + TRANSFER_FEE),
         );
 
@@ -129,7 +129,7 @@ impl BoomerangSetup {
             .await;
 
         let icp_ledger_id = env
-            .create_canister_with_id(None, None, ICP_LEDGER_ID.into())
+            .create_canister_with_id(None, None, ICP_LEDGER_ID)
             .await
             .unwrap();
         env.add_cycles(icp_ledger_id, u64::MAX.into()).await;
@@ -184,9 +184,7 @@ impl BoomerangSetup {
                     permission_type: NeuronPermissionType::all(),
                 }],
                 cached_neuron_stake_e8s: 10_000_000_000_000,
-                dissolve_state: Some(DissolveState::DissolveDelaySeconds(
-                    12 * ONE_MONTH_SECONDS as u64,
-                )),
+                dissolve_state: Some(DissolveState::DissolveDelaySeconds(12 * ONE_MONTH_SECONDS)),
                 voting_power_percentage_multiplier: 100,
                 ..Default::default()
             });
@@ -198,9 +196,9 @@ impl BoomerangSetup {
             water_neuron_id,
             water_neuron_wasm(),
             Encode!(&LiquidArg::Init(InitArg {
-                wtn_governance_id: sns.governance.into(),
-                wtn_ledger_id: sns.ledger.into(),
-                nicp_ledger_id: nicp_ledger_id,
+                wtn_governance_id: sns.governance,
+                wtn_ledger_id: sns.ledger,
+                nicp_ledger_id,
             }))
             .unwrap(),
             None,
@@ -215,7 +213,10 @@ impl BoomerangSetup {
                     .with_minting_account(water_neuron_id)
                     .with_transfer_fee(TRANSFER_FEE)
                     .with_decimals(8)
-                    .with_feature_flags(ic_icrc1_ledger::FeatureFlags { icrc2: true })
+                    .with_feature_flags(ic_icrc1_ledger::FeatureFlags {
+                        icrc2: true,
+                        ..Default::default()
+                    })
                     .build(),
             ))
             .unwrap(),
@@ -231,10 +232,10 @@ impl BoomerangSetup {
             boomerang_wasm(),
             Encode!(
                 &(CanisterIds {
-                    water_neuron_id: water_neuron_id.into(),
-                    icp_ledger_id: icp_ledger_id.into(),
-                    nicp_ledger_id: nicp_ledger_id.into(),
-                    wtn_ledger_id: sns.ledger.into()
+                    water_neuron_id,
+                    icp_ledger_id,
+                    nicp_ledger_id,
+                    wtn_ledger_id: sns.ledger
                 })
             )
             .unwrap(),
@@ -264,7 +265,7 @@ impl BoomerangSetup {
         update::<Result<u64, TransferError>>(
             &pic,
             self.icp_ledger_id,
-            caller.into(),
+            caller,
             "transfer",
             TransferArgs {
                 memo: Memo(0),
@@ -300,7 +301,7 @@ impl BoomerangSetup {
         update::<Result<Nat, IcrcTransferError>>(
             &pic,
             self.nicp_ledger_id,
-            caller.into(),
+            caller,
             "icrc1_transfer",
             TransferArg {
                 memo: None,
@@ -323,7 +324,7 @@ impl BoomerangSetup {
         update::<Result<DepositSuccess, BoomerangError>>(
             &pic,
             self.boomerang_id,
-            caller.into(),
+            caller,
             "notify_icp_deposit",
             caller,
         )
@@ -339,7 +340,7 @@ impl BoomerangSetup {
         update::<Result<WithdrawalSuccess, BoomerangError>>(
             &pic,
             self.boomerang_id,
-            caller.into(),
+            caller,
             "notify_nicp_deposit",
             caller,
         )
@@ -352,7 +353,7 @@ impl BoomerangSetup {
         update::<Account>(
             &pic,
             self.boomerang_id,
-            caller.into(),
+            caller,
             "get_staking_account",
             caller,
         )
@@ -365,7 +366,7 @@ impl BoomerangSetup {
         update::<Account>(
             &pic,
             self.boomerang_id,
-            caller.into(),
+            caller,
             "get_unstaking_account",
             caller,
         )
@@ -378,7 +379,7 @@ impl BoomerangSetup {
         update::<Nat>(
             &pic,
             self.icp_ledger_id,
-            caller.into(),
+            caller,
             "icrc1_balance_of",
             &(Account {
                 owner: caller,
@@ -394,7 +395,7 @@ impl BoomerangSetup {
         update::<Nat>(
             &pic,
             self.nicp_ledger_id,
-            caller.into(),
+            caller,
             "icrc1_balance_of",
             &(Account {
                 owner: caller,
@@ -410,7 +411,7 @@ impl BoomerangSetup {
         update::<Result<Nat, BoomerangError>>(
             &pic,
             self.boomerang_id,
-            caller.into(),
+            caller,
             "retrieve_nicp",
             caller,
         )
@@ -423,7 +424,7 @@ impl BoomerangSetup {
         update::<Result<Nat, BoomerangError>>(
             &pic,
             self.boomerang_id,
-            caller.into(),
+            caller,
             "try_retrieve_icp",
             caller,
         )

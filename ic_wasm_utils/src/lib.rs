@@ -1,7 +1,11 @@
 use lazy_static::lazy_static;
 use sha2::{Digest, Sha256};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::{collections::BTreeMap, path::PathBuf};
 use thiserror::Error;
+
+/// Paired with the process id, keeps one download's staging file from colliding with another's.
+static STAGING_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -42,15 +46,17 @@ struct WasmBinary {
 }
 
 lazy_static! {
-    // REF: https://github.com/dfinity/ic/releases/tag/release-2026-01-08_03-31-base
+    // The commit NNS governance runs on mainnet, elected by proposal 144200 on 2026-10-28. Its
+    // governance-canister.wasm.gz hash is the module hash the canister reports.
+    // REF: https://dashboard.internetcomputer.org/proposal/144200
     static ref DFINITY_CANISTERS: BTreeMap<CanisterName, WasmBinary> = {
-        let ic_version = "035a2c7a2b19bc7ce7c4d977169583eb64b0e3cb";
+        let ic_version = "98c898f8de068a1fc0e97ebc805f9fa7f315d862";
 
         let mut map = BTreeMap::new();
         map.insert(
             CanisterName::Ledger,
             WasmBinary {
-                hash: "67762b42631ac8c18069a6124e6c825096a50bb887e67dc3562aac12860ee564",
+                hash: "d16b2d3d8fc3673f14a255f0479ceca1877162127b1df828555eb5e19554dc27",
                 ic_version,
                 name: "ledger-canister.wasm.gz",
             },
@@ -58,7 +64,7 @@ lazy_static! {
         map.insert(
             CanisterName::NnsGovernance,
             WasmBinary {
-                hash: "37fdeb4fe9c32135e6b7b405ee2171734d936abb1a7f923eef1794bf9140ef1c",
+                hash: "7f85124ee08c3f59c0050009268807c7aea2b80ee296c23338b05458888f19df",
                 ic_version,
                 name: "governance-canister.wasm.gz",
             },
@@ -66,7 +72,7 @@ lazy_static! {
         map.insert(
             CanisterName::Cmc,
             WasmBinary {
-                hash: "33e398859dd3c988414f57596310a7ac6d12a809aa6907c7ad686e852d04f86e",
+                hash: "51b2820d47822d7f7f38c9fbadffd39d3af9facd6c2b919ba0fe6963d04d265b",
                 ic_version,
                 name: "cycles-minting-canister.wasm.gz",
             },
@@ -74,7 +80,7 @@ lazy_static! {
         map.insert(
             CanisterName::SnsGovernance,
             WasmBinary {
-                hash: "4f8787135324597ed3c83b5e2083d108652589b448d0ac2dec70eaedb78d60d6",
+                hash: "24ef2004240d2a34bcdaa616134d27bc18d11c1e96b378a46d564feedcc1a8c3",
                 ic_version,
                 name: "sns-governance-canister.wasm.gz",
             },
@@ -82,7 +88,7 @@ lazy_static! {
         map.insert(
             CanisterName::SnsSwap,
             WasmBinary {
-                hash: "c6567eab9ac13859c844d8f82e76121f8ca13c3ceb0fd703f60535eb55351f66",
+                hash: "f3c9cd2a503f3136c91f1d44c5b4bac2d5f15a7d347731aaff03e5fa80df8c48",
                 ic_version,
                 name: "sns-swap-canister.wasm.gz",
             },
@@ -90,7 +96,7 @@ lazy_static! {
         map.insert(
             CanisterName::Sns,
             WasmBinary {
-                hash: "ffe5262ff812c955cb63369f0bf4ed08d86ad0c18f2aa58c43076fcb460e8976",
+                hash: "156eaf0b5d93ed7f4789c8fdd09463b025e25bca9380bf811f5d316fec657192",
                 ic_version,
                 name: "sns-wasm-canister.wasm.gz",
             },
@@ -98,7 +104,7 @@ lazy_static! {
         map.insert(
             CanisterName::SnsRoot,
             WasmBinary {
-                hash: "dbef4e7af438505feca53f8c130dcd8c645e8f0894c3bd50634c1c6f070c8ffa",
+                hash: "bd39681c7586e2ecfafbd2857b8ee6d04899c1f69ac59f420a1ccdc2e054ae36",
                 ic_version,
                 name: "sns-root-canister.wasm.gz",
             },
@@ -106,7 +112,7 @@ lazy_static! {
         map.insert(
             CanisterName::Icrc1Ledger,
             WasmBinary {
-                hash: "860a14eadb4ce06f1ba9096522798db57f0c1fa3f8886cf803621a7e3e36385f",
+                hash: "67f7bad791c19a92c5ac17a65f3f5faa43195e5e568ddff1c90f33134dc25d12",
                 ic_version,
                 name: "ic-icrc1-ledger.wasm.gz",
             },
@@ -114,7 +120,7 @@ lazy_static! {
         map.insert(
             CanisterName::Icrc1IndexNg,
             WasmBinary {
-                hash: "cac207cf438df8c9fba46d4445c097f05fd8228a1eeacfe0536b7e9ddefc5f1c",
+                hash: "034bb1d09db50d8b8d3df5a03a16dedf90584226062738d85424582c3dbdc993",
                 ic_version,
                 name: "ic-icrc1-index-ng.wasm.gz",
             },
@@ -240,7 +246,14 @@ async fn fetch_remote_wasm(canister: CanisterName) -> Result<PathBuf> {
         return Err(Error::HashMismatch);
     }
 
-    std::fs::write(&cache_path, &data)?;
+    // Staged and renamed, so a concurrent fetch never reads a half-written module.
+    let staging_path = cache_path.with_extension(format!(
+        "{}.{}.partial",
+        std::process::id(),
+        STAGING_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::write(&staging_path, &data)?;
+    std::fs::rename(&staging_path, &cache_path)?;
     Ok(cache_path)
 }
 

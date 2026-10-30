@@ -1,9 +1,13 @@
+// Amounts are written in e8s with the integer part split from the eight decimals, so
+// `99_99_990_000` reads as 99.9999 ICP. Clippy sees that as inconsistent grouping.
+#![allow(clippy::inconsistent_digit_grouping)]
+
 use crate::state::event::{GetEventsArg, GetEventsResult};
 use crate::state::{TransferStatus, WithdrawalDetails};
 use crate::{
     CancelWithdrawalError, CanisterInfo, ConversionArg, ConversionError, DEFAULT_LEDGER_FEE,
-    DepositSuccess, E8S, INITIAL_NEURON_STAKE, InitArg, LiquidArg, NEURON_LEDGER_FEE, NeuronId,
-    WithdrawalSuccess, compute_neuron_staking_subaccount_bytes, nICP,
+    DepositSuccess, E8S, INITIAL_NEURON_STAKE, InitArg, LiquidArg, MIN_DISSOLVE_DELAY_FOR_REWARDS,
+    NEURON_LEDGER_FEE, NeuronId, WithdrawalSuccess, compute_neuron_staking_subaccount_bytes, nICP,
 };
 use assert_matches::assert_matches;
 use candid::{CandidType, Deserialize, Encode, Nat, Principal};
@@ -17,6 +21,7 @@ use ic_nns_constants::{CYCLES_LEDGER_CANISTER_ID, GOVERNANCE_CANISTER_ID, LEDGER
 use ic_nns_governance_api::{
     Governance, GovernanceError, MakeProposalRequest, ManageNeuronCommandRequest,
     ManageNeuronRequest, ManageNeuronResponse, NetworkEconomics, Neuron, ProposalInfo,
+    VotingPowerEconomics,
     manage_neuron::{
         self,
         claim_or_refresh::{self, MemoAndController},
@@ -171,7 +176,7 @@ async fn nns_claim_or_refresh_neuron(
         manage_neuron::ClaimOrRefresh {
             by: Some(claim_or_refresh::By::MemoAndController(MemoAndController {
                 memo,
-                controller: Some(controller.into()),
+                controller: Some(controller),
             })),
         },
     ));
@@ -342,10 +347,7 @@ impl SnsTestsInitPayloadBuilder {
     pub fn with_initial_neurons(&mut self, neurons: Vec<SnsNeuron>) -> &mut Self {
         let mut neuron_map = BTreeMap::new();
         for neuron in neurons {
-            neuron_map.insert(
-                format!("{}", hex::encode(neuron.id.as_ref().unwrap().id.clone())),
-                neuron,
-            );
+            neuron_map.insert(hex::encode(neuron.id.as_ref().unwrap().id.clone()), neuron);
         }
         self.governance.with_neurons(neuron_map);
         self
@@ -570,7 +572,7 @@ impl WaterNeuron {
 
         let mut initial_balances = HashMap::new();
         initial_balances.insert(
-            AccountIdentifier::new(minter.into(), None),
+            AccountIdentifier::new(minter, None),
             Tokens::from_e8s(22_000_000 * E8S),
         );
         initial_balances.insert(
@@ -608,7 +610,18 @@ impl WaterNeuron {
             GOVERNANCE_CANISTER_ID.into(),
             governance_wasm().await,
             Encode!(&Governance {
-                economics: Some(NetworkEconomics::with_default_values()),
+                economics: Some(NetworkEconomics {
+                    // Mainnet lowered the vote-eligibility floor to two weeks, the delay the main
+                    // neuron sits at. The code default is still six months, under which the main
+                    // neuron is left out of every proposal's ballots and can never vote.
+                    voting_power_economics: Some(VotingPowerEconomics {
+                        neuron_minimum_dissolve_delay_to_vote_seconds: Some(
+                            MIN_DISSOLVE_DELAY_FOR_REWARDS
+                        ),
+                        ..VotingPowerEconomics::with_default_values()
+                    }),
+                    ..NetworkEconomics::with_default_values()
+                }),
                 wait_for_quiet_threshold_seconds: 60 * 60 * 24 * 4, // 4 days
                 short_voting_period_seconds: 60 * 60 * 12,          // 12 hours
                 neuron_management_voting_period_seconds: Some(60 * 60 * 48), // 48 hours
@@ -649,7 +662,7 @@ impl WaterNeuron {
                 }],
                 cached_neuron_stake_e8s: 10_000_000_000_000,
                 dissolve_state: Some(DissolveState::DissolveDelaySeconds(
-                    12 * crate::ONE_MONTH_SECONDS as u64,
+                    12 * crate::ONE_MONTH_SECONDS,
                 )),
                 voting_power_percentage_multiplier: 100,
                 ..Default::default()
@@ -669,7 +682,7 @@ impl WaterNeuron {
                 cmc_wasm().await,
                 Encode!(&Some(CyclesCanisterInitPayload {
                     ledger_canister_id: Some(LEDGER_CANISTER_ID),
-                    governance_canister_id: Some(GOVERNANCE_CANISTER_ID.into()),
+                    governance_canister_id: Some(GOVERNANCE_CANISTER_ID),
                     exchange_rate_canister: None,
                     minting_account_id: Some(GOVERNANCE_CANISTER_ID.into()),
                     last_purged_notification: Some(1),
@@ -704,7 +717,10 @@ impl WaterNeuron {
                     .with_minting_account(water_neuron_canister_id)
                     .with_transfer_fee(DEFAULT_LEDGER_FEE)
                     .with_decimals(8)
-                    .with_feature_flags(ic_icrc1_ledger::FeatureFlags { icrc2: true })
+                    .with_feature_flags(ic_icrc1_ledger::FeatureFlags {
+                        icrc2: true,
+                        ..Default::default()
+                    })
                     .build(),
             ))
             .unwrap(),
@@ -1005,6 +1021,37 @@ impl WaterNeuron {
         .expect("failed to get approve_proposal")
     }
 
+    /// Calls one of the main-neuron endpoints gated to the SNS governance canister.
+    async fn main_neuron_call(
+        &self,
+        method: &str,
+        neuron_nonce: u64,
+    ) -> Result<ManageNeuronResponse, String> {
+        self.update::<Result<ManageNeuronResponse, String>>(
+            PrincipalId::from(self.wtn_governance_id),
+            self.water_neuron_id,
+            method,
+            neuron_nonce,
+        )
+        .await
+        .unwrap_or_else(|e| panic!("failed to call {method}: {e:?}"))
+    }
+
+    /// Freezes a withdrawal neuron's dissolve, as a failed cancel used to. `self_check` only.
+    async fn park_withdrawal_neuron(
+        &self,
+        neuron_id: NeuronId,
+    ) -> Result<ManageNeuronResponse, String> {
+        self.update::<Result<ManageNeuronResponse, String>>(
+            PrincipalId::from(Principal::anonymous()),
+            self.water_neuron_id,
+            "park_withdrawal_neuron",
+            neuron_id,
+        )
+        .await
+        .expect("failed to call park_withdrawal_neuron")
+    }
+
     async fn get_info(&self) -> CanisterInfo {
         self.query::<CanisterInfo>(self.water_neuron_id, "get_info", Encode!().unwrap())
             .await
@@ -1136,7 +1183,7 @@ async fn init_wtn_withdrawal_setup(wtn: &mut WaterNeuron) {
     assert_eq!(
         wtn.balance_of(wtn.icp_ledger_id, info.neuron_6m_account)
             .await,
-        Nat::from(wtn_6m_start_icp_balance + icp_to_wrap)
+        wtn_6m_start_icp_balance + icp_to_wrap
     );
     assert_eq!(
         wtn.balance_of(wtn.nicp_ledger_id, caller.0).await,

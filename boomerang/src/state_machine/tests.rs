@@ -38,7 +38,7 @@ async fn check_e2e() {
                 1_000 * E8S,
                 AccountIdentifier::new(
                     staking_account.owner.into(),
-                    staking_account.subaccount.map(|s| Subaccount(s))
+                    staking_account.subaccount.map(Subaccount)
                 )
             )
             .await
@@ -57,7 +57,7 @@ async fn check_e2e() {
 
     boomerang
         .nicp_transfer(
-            boomerang.water_neuron_id.into(),
+            boomerang.water_neuron_id,
             None,
             balance,
             Account {

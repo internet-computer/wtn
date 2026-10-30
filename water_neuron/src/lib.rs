@@ -2,9 +2,9 @@ use crate::dashboard::DisplayAmount;
 use crate::guards::{GuardError, TaskGuard};
 use crate::logs::{DEBUG, INFO};
 use crate::management::{
-    balance_of, disburse, follow_neuron, get_full_neuron, increase_dissolve_delay, list_neurons,
-    manage_neuron_sns, refresh_neuron, register_vote, spawn_all_maturity, split_neuron,
-    start_dissolving, transfer,
+    StartDissolvingError, balance_of, disburse, follow_neuron, get_full_neuron,
+    increase_dissolve_delay, list_neurons, manage_neuron_sns, refresh_neuron, register_vote,
+    spawn_all_maturity, split_neuron, start_dissolving, transfer,
 };
 use crate::nns_types::{NeuronId, ProposalId, is_dissolved};
 use crate::numeric::{ICP, nICP};
@@ -25,8 +25,8 @@ use crate::tasks::{TaskType, schedule_after, schedule_now};
 use candid::{CandidType, Deserialize, Nat, Principal};
 use ic_canister_log::log;
 use ic_nns_governance_api::{
-    GovernanceError, ListNeurons, Topic, manage_neuron_response::Command as CommandResponse,
-    neuron::DissolveState,
+    GovernanceError, ListNeurons, Neuron, Topic, governance_error::ErrorType,
+    manage_neuron_response::Command as CommandResponse, neuron::DissolveState,
 };
 use icrc_ledger_client_cdk::{CdkRuntime, ICRC1Client};
 use icrc_ledger_types::icrc1::account::Account;
@@ -80,7 +80,10 @@ pub const ONE_DAY_SECONDS: u64 = 24 * 60 * 60;
 pub const ONE_WEEK_SECONDS: u64 = 7 * ONE_DAY_SECONDS;
 pub const ONE_YEAR_SECONDS: u64 = (4 * 365 + 1) * ONE_DAY_SECONDS / 4;
 pub const ONE_MONTH_SECONDS: u64 = ONE_YEAR_SECONDS / 12;
-pub const MAX_DISSOLVE_DELAY_SECONDS: u64 = 8 * ONE_YEAR_SECONDS;
+/// The NNS cut the maximum dissolve delay from eight years to two in Mission 70, and rejects an
+/// increase past it. Neurons that sat at the old maximum keep their bonus through
+/// `eight_year_gang_bonus_base_e8s` instead.
+pub const MAX_DISSOLVE_DELAY_SECONDS: u64 = 2 * ONE_YEAR_SECONDS;
 pub const MIN_DISSOLVE_DELAY_FOR_REWARDS: u64 = 2 * ONE_WEEK_SECONDS;
 
 pub const DEFAULT_LEDGER_FEE: u64 = 10_000;
@@ -777,6 +780,21 @@ async fn fetch_neuron_stake(neuron_id: u64) -> Result<ICP, String> {
     }
 }
 
+/// A neuron split off a dissolving parent inherits its dissolve state, and the NNS rejects
+/// StartDissolving on anything that is not NotDissolving. The neuron is then already in the state
+/// the call was meant to reach, so the withdrawal must move on to disbursement rather than retry
+/// forever.
+fn is_already_dissolving(result: &Result<(), StartDissolvingError>) -> bool {
+    let Err(StartDissolvingError::UnexpectedAnswer(response)) = result else {
+        return false;
+    };
+    matches!(
+        &response.command,
+        Some(CommandResponse::Error(error))
+            if error.error_type == ErrorType::RequiresNotDissolving as i32
+    )
+}
+
 pub async fn process_start_dissolving() {
     if read_state(|s| s.withdrawal_to_start_dissolving.is_empty()) {
         return;
@@ -793,7 +811,7 @@ pub async fn process_start_dissolving() {
             return;
         }
         let result = start_dissolving(*neuron_id).await;
-        if result.is_ok() {
+        if result.is_ok() || is_already_dissolving(&result) {
             mutate_state(|s| {
                 if let Some(withdrawal_id) = s.neuron_id_to_withdrawal_id(*neuron_id) {
                     process_event(s, EventType::StartedToDissolve { withdrawal_id });
@@ -814,6 +832,43 @@ pub async fn process_start_dissolving() {
                 "[process_start_dissolving] Failed with error: {result:?}"
             );
         }
+    }
+}
+
+/// A withdrawal neuron waiting to disburse must be counting down towards its dissolve timestamp.
+/// One that the NNS reports as NotDissolving was stopped by a `cancel_withdrawal` whose merge then
+/// failed, and is parked at a dissolve delay that never reaches zero: unless the dissolve is
+/// restarted the request can never disburse, and a later cancel would merge the neuron at that
+/// frozen delay and raise the main neuron's own delay to match.
+async fn restart_parked_dissolvement(neuron: &Neuron) {
+    let Some(DissolveState::DissolveDelaySeconds(delay)) = neuron.dissolve_state else {
+        return;
+    };
+    let Some(neuron_id) = neuron.id.as_ref().map(|id| NeuronId { id: id.id }) else {
+        return;
+    };
+    // Maturity neurons share `to_disburse` and are spawning rather than dissolving.
+    if delay == 0 || read_state(|s| s.neuron_id_to_withdrawal_id(neuron_id).is_none()) {
+        return;
+    }
+
+    log!(
+        INFO,
+        "[process_disburse] Neuron {} is parked at a dissolve delay of {delay}s, restarting its dissolvement",
+        neuron_id.id
+    );
+
+    match start_dissolving(neuron_id).await {
+        Ok(()) => log!(
+            INFO,
+            "[process_disburse] Restarted the dissolvement of neuron {}",
+            neuron_id.id
+        ),
+        Err(error) => log!(
+            INFO,
+            "[process_disburse] Failed to restart the dissolvement of neuron {}: {error:?}",
+            neuron_id.id
+        ),
     }
 }
 
@@ -886,6 +941,7 @@ pub async fn process_disburse() {
                         dissolved
                     );
                     if !dissolved {
+                        restart_parked_dissolvement(&neuron).await;
                         continue;
                     }
                     if let Some(neuron_id) = neuron.id {
